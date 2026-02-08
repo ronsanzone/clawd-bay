@@ -19,8 +19,8 @@ func TestCLI_Version(t *testing.T) {
 		t.Fatalf("version command failed: %v", err)
 	}
 
-	if !strings.Contains(string(output), "ClawdBay") {
-		t.Errorf("output = %q, want to contain 'ClawdBay'", output)
+	if !strings.Contains(string(output), "0.2.0") {
+		t.Errorf("output = %q, want to contain version '0.2.0'", output)
 	}
 }
 
