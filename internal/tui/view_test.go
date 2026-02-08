@@ -14,9 +14,9 @@ func TestRenderStatusBadge(t *testing.T) {
 		status tmux.Status
 		want   string
 	}{
-		{tmux.StatusWorking, "● WORKING"},
-		{tmux.StatusIdle, "○ IDLE"},
-		{tmux.StatusDone, "◌ DONE"},
+		{tmux.StatusWorking, "•"},
+		{tmux.StatusIdle, "◦"},
+		{tmux.StatusDone, "·"},
 	}
 
 	for _, tt := range tests {

@@ -110,21 +110,19 @@ func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
 			icon = "▼"
 		}
 		badge := m.renderStatusBadge(session.Status)
-		left := cursor + "  " + icon + " " + m.Styles.Session.Render(session.Name)
-		line = m.rightAlign(left, badge)
+		line = cursor + "  " + icon + " " + badge + " " + m.Styles.Session.Render(session.Name)
 
 	case NodeWindow:
 		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
-		badge := ""
+		badge := " "
 		if strings.HasPrefix(window.Name, "claude") {
 			key := session.Name + ":" + window.Name
 			if status, ok := m.WindowStatuses[key]; ok {
 				badge = m.renderStatusBadge(status)
 			}
 		}
-		left := cursor + "      " + m.Styles.Window.Render(window.Name)
-		line = m.rightAlign(left, badge)
+		line = cursor + "      " + badge + " " + m.Styles.Window.Render(window.Name)
 
 	default:
 		line = cursor + "Unknown"
@@ -146,26 +144,23 @@ func (m Model) rightAlign(left, right string) string {
 	available := m.frameWidth() - 4
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
-	gap := available - leftWidth - rightWidth
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(available-leftWidth-rightWidth, 1)
 
 	return left + strings.Repeat(" ", gap) + right
 }
 
 // renderStatusBadge renders a colored status badge.
-// Badge symbols show activity level: ● (working) > ◉ (waiting) > ○ (idle) > ◌ (done)
+// Badge symbols show activity level: • (working) > ◐ (waiting) > ◦ (idle) > · (done)
 func (m Model) renderStatusBadge(status tmux.Status) string {
 	switch status {
 	case tmux.StatusWorking:
-		return m.Styles.StatusWorking.Render("● WORKING")
+		return m.Styles.StatusWorking.Render("•")
 	case tmux.StatusWaiting:
-		return m.Styles.StatusWaiting.Render("◉ WAITING")
+		return m.Styles.StatusWaiting.Render("◐")
 	case tmux.StatusIdle:
-		return m.Styles.StatusIdle.Render("○ IDLE")
+		return m.Styles.StatusIdle.Render("◦")
 	default: // StatusDone
-		return m.Styles.StatusDone.Render("◌ DONE")
+		return m.Styles.StatusDone.Render("·")
 	}
 }
 

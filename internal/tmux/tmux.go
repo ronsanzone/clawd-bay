@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -80,9 +81,9 @@ func (c *Client) ListWindows(session string) ([]Window, error) {
 // ParseSessionList parses tmux list-sessions output and returns only cb_ prefixed sessions.
 func ParseSessionList(output string) []Session {
 	var sessions []Session
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
 
-	for _, line := range lines {
+	for line := range lines {
 		if line == "" {
 			continue
 		}
@@ -161,22 +162,20 @@ func (c *Client) GetPaneStatus(session, window string) Status {
 	target := session + ":" + window
 	output, err := c.execCommand("tmux", "display-message", "-t", target, "-p", "#{pane_current_command}")
 	if err != nil {
+		slog.Debug("GetPaneStatus: display-message failed", "target", target, "err", err)
 		return StatusDone
 	}
 
 	cmd := strings.TrimSpace(string(output))
+	slog.Debug("GetPaneStatus", "target", target, "pane_command", cmd)
 
 	// If the pane is running a shell, Claude has exited
 	if cmd == "zsh" || cmd == "bash" || cmd == "sh" {
 		return StatusDone
 	}
 
-	// If claude is running, inspect pane content to distinguish IDLE vs WORKING
-	if cmd == "claude" || strings.Contains(cmd, "claude") {
-		return c.detectClaudeActivity(target)
-	}
-
-	return StatusDone
+	// Something is running in this claude window — inspect pane content
+	return c.detectClaudeActivity(target)
 }
 
 // detectClaudeActivity inspects the last few lines of a pane to determine
@@ -187,12 +186,15 @@ func (c *Client) GetPaneStatus(session, window string) Status {
 //  2. Prompt indicators (permission dialogs, input prompts) → WAITING
 //  3. Default → IDLE
 func (c *Client) detectClaudeActivity(target string) Status {
-	output, err := c.execCommand("tmux", "capture-pane", "-t", target, "-p", "-l", "10")
+	slog.Debug("detectClaudeActivity", "target", target)
+	output, err := c.execCommand("tmux", "capture-pane", "-t", target, "-p", "-S", "20")
 	if err != nil {
+		slog.Debug("detectClaudeActivity", "tmux err", err)
 		return StatusIdle
 	}
 
 	content := string(output)
+	slog.Debug("detectClaudeActivity", "target", target, "content", content)
 
 	// Priority 1: Check busy indicators
 	if hasBusyIndicator(content) {
@@ -266,6 +268,7 @@ var confirmationPatterns = []string{
 	"proceed?",
 	"(y/n)",
 	"[yes/no]",
+	"enter to select",
 }
 
 // hasPromptIndicator reports whether content contains indicators that Claude

@@ -39,8 +39,8 @@ var KanagawaClaw = Theme{
 	Info:      lipgloss.Color("#7E9CD8"),
 
 	Working: lipgloss.Color("#98BB6C"),
-	Waiting: lipgloss.Color("#E6C384"),
-	Idle:    lipgloss.Color("#FF9E3B"),
+	Waiting: lipgloss.Color("#FFA066"),
+	Idle:    lipgloss.Color("#7FB4CA"),
 	Done:    lipgloss.Color("#54546D"),
 }
 

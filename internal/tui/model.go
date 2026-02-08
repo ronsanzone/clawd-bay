@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -74,8 +75,8 @@ type Model struct {
 	Width          int
 	Height         int
 	ScrollOffset   int
-	Styles    Styles
-	StatusMsg string // transient feedback message shown in status bar
+	Styles         Styles
+	StatusMsg      string // transient feedback message shown in status bar
 }
 
 // RollupStatus returns the most active status from a slice.
@@ -261,14 +262,18 @@ func (m Model) refreshCmd() tea.Cmd {
 
 // fetchGroups queries tmux for all data.
 func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status) {
+	slog.Debug("fetchGroups called")
 	if tmuxClient == nil {
+		slog.Debug("fetchGroups: tmuxClient is nil")
 		return nil, nil
 	}
 
 	sessions, err := tmuxClient.ListSessions()
 	if err != nil {
+		slog.Debug("fetchGroups: ListSessions failed", "err", err)
 		return nil, nil
 	}
+	slog.Debug("fetchGroups: found sessions", "count", len(sessions))
 
 	repoNames := make(map[string]string)
 	windowMap := make(map[string][]tmux.Window)
@@ -285,6 +290,7 @@ func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status) 
 
 		for _, w := range wins {
 			if strings.HasPrefix(w.Name, "claude") {
+				slog.Debug("fetchGroups: checking claude window", "session", s.Name, "window", w.Name)
 				statusMap[s.Name+":"+w.Name] = tmuxClient.GetPaneStatus(s.Name, w.Name)
 			}
 		}
@@ -308,10 +314,7 @@ func (m *Model) adjustScroll() {
 // treeHeight returns the number of lines available for the tree view.
 // Accounts for borders (2), status bar (1), and frame padding (1).
 func (m Model) treeHeight() int {
-	h := m.Height - 4
-	if h < 1 {
-		h = 1
-	}
+	h := max(m.Height-4, 1)
 	return h
 }
 
