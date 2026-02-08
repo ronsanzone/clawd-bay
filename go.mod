@@ -1,6 +1,6 @@
 module github.com/rsanzone/clawdbay
 
-go 1.25.6
+go 1.25.7
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
