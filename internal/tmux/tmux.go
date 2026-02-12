@@ -34,6 +34,8 @@ const (
 	StatusDone Status = "DONE"
 )
 
+var agentProcessNames = []string{"claude"}
+
 // Client provides tmux operations.
 type Client struct {
 	execCommand     func(name string, args ...string) ([]byte, error)
@@ -52,6 +54,41 @@ func NewClient() *Client {
 			return cmd.Run()
 		},
 	}
+}
+
+// ListSessions returns all ClawdBay tmux sessions.
+func (c *Client) ListAllSessions() ([]Session, error) {
+	output, err := c.execCommand("tmux", "list-sessions")
+	if err != nil {
+		// tmux not running or no sessions is expected, return empty list
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "no server running") ||
+			strings.Contains(errMsg, "no sessions") {
+			return []Session{}, nil
+		}
+		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+
+	var sessions []Session
+	lines := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
+	for line := range lines {
+		if line == "" {
+			continue
+		}
+
+		// Parse: "cb_proj-123-auth: 3 windows (created ...)"
+		// Session name is everything before the colon-space pattern " N windows"
+		colonSpace := strings.Index(line, ": ")
+		if colonSpace == -1 {
+			continue
+		}
+		name := line[:colonSpace]
+
+		sessions = append(sessions, Session{
+			Name: name,
+		})
+	}
+	return sessions, nil
 }
 
 // ListSessions returns all ClawdBay tmux sessions.
@@ -156,17 +193,40 @@ func ParseWindowList(output string) []Window {
 	return windows
 }
 
+func (c *Client) DetectAgentProcess(session, window string) bool {
+	target := session + ":" + window
+	paneTty, err := c.getDisplayMessage(target, "#{pane_tty}")
+	if err != nil {
+		slog.Debug("DetectAgentProcess getDisplayMessage failed", "target", target, "err", err)
+		return false
+	}
+
+	output, err := c.execCommand("ps", "-t", paneTty)
+	if err != nil {
+		slog.Debug("DetectAgentProcess ps failed", "target", target, "err", err)
+		return false
+	}
+
+	processStr := strings.TrimSpace(string(output))
+
+	for _, v := range agentProcessNames {
+		if strings.Contains(processStr, v) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPaneStatus detects if a Claude session is IDLE, WORKING, or DONE
 // by checking the pane's current command and inspecting pane content.
 func (c *Client) GetPaneStatus(session, window string) Status {
 	target := session + ":" + window
-	output, err := c.execCommand("tmux", "display-message", "-t", target, "-p", "#{pane_current_command}")
+	cmd, err := c.getDisplayMessage(target, "#{pane_current_command}")
 	if err != nil {
-		slog.Debug("GetPaneStatus: display-message failed", "target", target, "err", err)
+		slog.Debug("GetPaneStatus: getDisplayMessage failed", "target", target, "err", err)
 		return StatusDone
 	}
 
-	cmd := strings.TrimSpace(string(output))
 	slog.Debug("GetPaneStatus", "target", target, "pane_command", cmd)
 
 	// If the pane is running a shell, Claude has exited
@@ -176,6 +236,17 @@ func (c *Client) GetPaneStatus(session, window string) Status {
 
 	// Something is running in this claude window — inspect pane content
 	return c.detectClaudeActivity(target)
+}
+
+// getDisplayMessage executes a display-message call with a given printFilter
+func (c *Client) getDisplayMessage(target string, printFilter string) (string, error) {
+	output, err := c.execCommand("tmux", "display-message", "-t", target, "-p", printFilter)
+	if err != nil {
+		slog.Debug("getDisplayMessage: display-message failed", "target", target, "err", err)
+		return "", err
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 // detectClaudeActivity inspects the last few lines of a pane to determine
