@@ -11,6 +11,10 @@
 ```bash
 git clone https://github.com/rsanzone/clawdbay.git
 cd clawdbay
+# install latest published version
+make install
+
+# or build from this checkout
 make build
 ```
 

@@ -7,7 +7,10 @@ A CLI + TUI tool for managing multi-session coding-agent workflows across git wo
 **Prerequisites:** Go 1.25.7+, tmux 3.x+, and at least one coding agent CLI (`claude`, `codex`, or `open-code`) on your PATH.
 
 ```bash
-# Install
+# Install latest published version
+make install
+
+# Or build from this checkout
 make build
 
 # Configure projects that should appear in dash/list

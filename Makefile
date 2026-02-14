@@ -1,4 +1,6 @@
-.PHONY: build test test-integration lint verify install clean run debug smoke
+.PHONY: build test test-integration lint verify install install-local clean run debug smoke
+
+MODULE := github.com/rsanzone/clawdbay
 
 build:
 	go build -o cb main.go
@@ -24,7 +26,10 @@ lint:
 verify: test lint
 	@echo "All checks passed"
 
-install: build
+install:
+	go install $(MODULE)@latest
+
+install-local: build
 	cp cb ~/bin/cb
 
 clean:
