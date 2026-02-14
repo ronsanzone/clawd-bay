@@ -3,6 +3,7 @@
 
 # Git worktrees
 .worktrees/
+/cb
 
 # Python
 __pycache__/
