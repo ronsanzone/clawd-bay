@@ -43,14 +43,21 @@ func (m Model) View() string {
 
 // renderTree renders the scrollable tree content.
 func (m Model) renderTree(width int) string {
-	if len(m.Nodes) == 0 {
+	nodes := m.nodesForView()
+	if len(nodes) == 0 {
+		if m.FilterMode {
+			return "No matches.\n  Press esc to clear filter."
+		}
 		return "No active sessions.\n  Start one with: cb start <branch-name>"
 	}
 
-	lines := m.buildDisplayLines()
+	lines := m.buildDisplayLines(nodes)
 	treeHeight := m.treeHeight()
 
-	cursorLine := CursorToLine(m.Nodes, m.Cursor)
+	cursorLine := m.cursorForView()
+	if !m.FilterMode {
+		cursorLine = CursorToLine(nodes, cursorLine)
+	}
 	start, end, _ := VisibleRange(len(lines), treeHeight, cursorLine, m.ScrollOffset)
 
 	visibleLines := lines[start:end]
@@ -69,12 +76,12 @@ func (m Model) renderTree(width int) string {
 }
 
 // buildDisplayLines renders all tree nodes to display lines.
-func (m Model) buildDisplayLines() []string {
+func (m Model) buildDisplayLines(nodes []TreeNode) []string {
 	var lines []string
 
-	for i, node := range m.Nodes {
-		// Insert blank separator before each repo (except first)
-		if node.Type == NodeRepo && i > 0 {
+	for i, node := range nodes {
+		// Insert blank separator before each repo (except first) in normal tree mode.
+		if !m.FilterMode && node.Type == NodeRepo && i > 0 {
 			lines = append(lines, "")
 		}
 
@@ -86,7 +93,7 @@ func (m Model) buildDisplayLines() []string {
 
 // renderNodeLine renders one tree node.
 func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
-	selected := nodeIdx == m.Cursor
+	selected := nodeIdx == m.cursorForView()
 	cursor := "  "
 	if selected {
 		cursor = "❯ "
@@ -191,20 +198,24 @@ func (m Model) renderStatusBar() string {
 
 // renderFooter renders context-sensitive keybindings.
 func (m Model) renderFooter() string {
+	if m.FilterMode {
+		return fmt.Sprintf("filter: %q  ·  type to search  ·  j/k navigate  ·  enter select  ·  esc clear", m.FilterQuery)
+	}
+
 	if m.Cursor >= len(m.Nodes) {
-		return "j/k navigate  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  q quit"
 	}
 
 	node := m.Nodes[m.Cursor]
 	switch node.Type {
 	case NodeRepo:
-		return "j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  q quit"
 	case NodeSession:
-		return "j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
 	case NodeWindow:
-		return "j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
 	default:
-		return "j/k navigate  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  q quit"
 	}
 }
 

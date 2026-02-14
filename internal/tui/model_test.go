@@ -221,8 +221,8 @@ func TestStatusRollup(t *testing.T) {
 
 func TestSessionCounts(t *testing.T) {
 	tests := []struct {
-		name                                       string
-		groups                                     []RepoGroup
+		name                                    string
+		groups                                  []RepoGroup
 		wantTotal, wantWork, wantWait, wantIdle int
 	}{
 		{
@@ -296,22 +296,22 @@ func TestVisibleRange(t *testing.T) {
 		wantScroll int
 	}{
 		{
-			name: "fits in view",
+			name:      "fits in view",
 			lineCount: 5, viewHeight: 10, cursorLine: 2, scrollOff: 0,
 			wantStart: 0, wantEnd: 5, wantScroll: 0,
 		},
 		{
-			name: "cursor below viewport scrolls down",
+			name:      "cursor below viewport scrolls down",
 			lineCount: 20, viewHeight: 10, cursorLine: 12, scrollOff: 0,
 			wantStart: 3, wantEnd: 13, wantScroll: 3,
 		},
 		{
-			name: "cursor above viewport scrolls up",
+			name:      "cursor above viewport scrolls up",
 			lineCount: 20, viewHeight: 10, cursorLine: 2, scrollOff: 5,
 			wantStart: 2, wantEnd: 12, wantScroll: 2,
 		},
 		{
-			name: "cursor at end",
+			name:      "cursor at end",
 			lineCount: 20, viewHeight: 10, cursorLine: 19, scrollOff: 0,
 			wantStart: 10, wantEnd: 20, wantScroll: 10,
 		},
@@ -505,5 +505,151 @@ func TestCursorToLine(t *testing.T) {
 				t.Errorf("CursorToLine(%d) = %d, want %d", tt.cursor, line, tt.wantLine)
 			}
 		})
+	}
+}
+
+func TestHandleEnter_WindowSetsSelectedWindowIndex(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{
+						Name:     "cb_test",
+						Expanded: true,
+						Windows: []tmux.Window{
+							{Index: 0, Name: "shell"},
+							{Index: 5, Name: "claude"},
+						},
+					},
+				},
+			},
+		},
+		Styles:              NewStyles(KanagawaClaw),
+		WindowStatuses:      make(map[string]tmux.Status),
+		SelectedWindowIndex: -1,
+		Cursor:              3, // second window node
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	updated, cmd := m.handleEnter()
+	result := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd when selecting window")
+	}
+	if result.SelectedName != "cb_test" {
+		t.Fatalf("SelectedName = %q, want %q", result.SelectedName, "cb_test")
+	}
+	if result.SelectedWindowIndex != 5 {
+		t.Fatalf("SelectedWindowIndex = %d, want %d", result.SelectedWindowIndex, 5)
+	}
+}
+
+func TestFilterModeLifecycle(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "my-repo",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{
+						Name:     "cb_feature",
+						Expanded: true,
+						Windows: []tmux.Window{
+							{Index: 0, Name: "shell"},
+							{Index: 2, Name: "claude:review"},
+						},
+					},
+				},
+			},
+		},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if !m.FilterMode {
+		t.Fatal("expected filter mode to be enabled")
+	}
+	if len(m.FilteredNodes) != len(m.Nodes) {
+		t.Fatalf("FilteredNodes len = %d, want %d", len(m.FilteredNodes), len(m.Nodes))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("claude")})
+	m = updated.(Model)
+	if m.FilterQuery != "claude" {
+		t.Fatalf("FilterQuery = %q, want %q", m.FilterQuery, "claude")
+	}
+	if len(m.FilteredNodes) != 1 {
+		t.Fatalf("FilteredNodes len = %d, want %d", len(m.FilteredNodes), 1)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(Model)
+	if m.FilterQuery != "claud" {
+		t.Fatalf("FilterQuery after backspace = %q, want %q", m.FilterQuery, "claud")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.FilterMode {
+		t.Fatal("expected filter mode to be disabled")
+	}
+	if m.FilterQuery != "" {
+		t.Fatalf("FilterQuery = %q, want empty", m.FilterQuery)
+	}
+}
+
+func TestFilterEnterSelectsWindowByIndex(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo-one",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{
+						Name:     "cb_demo",
+						Expanded: true,
+						Windows: []tmux.Window{
+							{Index: 0, Name: "shell"},
+							{Index: 7, Name: "claude:default"},
+						},
+					},
+				},
+			},
+		},
+		Styles:              NewStyles(KanagawaClaw),
+		WindowStatuses:      make(map[string]tmux.Status),
+		Width:               80,
+		Height:              24,
+		SelectedWindowIndex: -1,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("claude:default")})
+	m = updated.(Model)
+
+	if len(m.FilteredNodes) != 1 {
+		t.Fatalf("FilteredNodes len = %d, want %d", len(m.FilteredNodes), 1)
+	}
+
+	updatedModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := updatedModel.(Model)
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd from enter on filtered window")
+	}
+	if result.SelectedName != "cb_demo" {
+		t.Fatalf("SelectedName = %q, want %q", result.SelectedName, "cb_demo")
+	}
+	if result.SelectedWindowIndex != 7 {
+		t.Fatalf("SelectedWindowIndex = %d, want %d", result.SelectedWindowIndex, 7)
 	}
 }

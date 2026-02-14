@@ -80,7 +80,7 @@ func TestBuildDisplayLines(t *testing.T) {
 	}
 	m.Nodes = BuildNodes(m.Groups)
 
-	lines := m.buildDisplayLines()
+	lines := m.buildDisplayLines(m.Nodes)
 
 	// Expect: repo-a, s1, shell, <blank>, repo-b, s2 = 6 lines
 	if len(lines) != 6 {
@@ -140,5 +140,35 @@ func TestViewEmptyState(t *testing.T) {
 
 	if !strings.Contains(view, "No active sessions") {
 		t.Error("empty view missing 'No active sessions' message")
+	}
+}
+
+func TestViewFilterModeHint(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{Name: "cb_test", Expanded: true, Windows: []tmux.Window{{Name: "shell"}}},
+				},
+			},
+		},
+		FilterMode:     true,
+		FilterQuery:    "missing",
+		FilteredNodes:  []TreeNode{},
+		WindowStatuses: make(map[string]tmux.Status),
+		Styles:         NewStyles(KanagawaClaw),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	view := m.View()
+	if !strings.Contains(view, `filter: "missing"`) {
+		t.Fatalf("view missing filter hint: %q", view)
+	}
+	if !strings.Contains(view, "No matches") {
+		t.Fatalf("view missing no matches message: %q", view)
 	}
 }
