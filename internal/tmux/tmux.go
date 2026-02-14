@@ -491,8 +491,18 @@ func (c *Client) CreateWindow(session, name string, command string) error {
 // then sends the command via send-keys. This ensures the user's profile files
 // (.zshrc, .zprofile, .bashrc) are sourced and env vars are available.
 func (c *Client) CreateWindowWithShell(session, name, command string) error {
+	return c.CreateWindowWithShellInDir(session, name, command, "")
+}
+
+// CreateWindowWithShellInDir creates a new window in the given working directory
+// with an interactive login shell, then sends the command via send-keys.
+func (c *Client) CreateWindowWithShellInDir(session, name, command, workdir string) error {
 	// Create window with default shell (interactive login shell)
-	_, err := c.execCommand("tmux", "new-window", "-t", session, "-n", name)
+	args := []string{"new-window", "-t", session, "-n", name}
+	if workdir != "" {
+		args = append(args, "-c", workdir)
+	}
+	_, err := c.execCommand("tmux", args...)
 	if err != nil {
 		return fmt.Errorf("failed to create window %s in %s: %w", name, session, err)
 	}

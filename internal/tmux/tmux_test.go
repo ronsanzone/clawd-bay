@@ -614,6 +614,49 @@ func TestClient_CreateWindowWithShell(t *testing.T) {
 	}
 }
 
+func TestClient_CreateWindowWithShellInDir(t *testing.T) {
+	var calls [][]string
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string{name}, args...))
+			return nil, nil
+		},
+	}
+
+	err := client.CreateWindowWithShellInDir("cb_test", "claude", "claude", "/tmp/repo/.worktrees/repo-feature")
+	if err != nil {
+		t.Fatalf("CreateWindowWithShellInDir() error = %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("got %d tmux calls, want 2", len(calls))
+	}
+
+	newWindowArgs := calls[0]
+	expectedNewWindow := []string{
+		"tmux", "new-window", "-t", "cb_test", "-n", "claude", "-c", "/tmp/repo/.worktrees/repo-feature",
+	}
+	if len(newWindowArgs) != len(expectedNewWindow) {
+		t.Fatalf("new-window args = %v, want %v", newWindowArgs, expectedNewWindow)
+	}
+	for i, arg := range expectedNewWindow {
+		if newWindowArgs[i] != arg {
+			t.Errorf("new-window arg[%d] = %q, want %q", i, newWindowArgs[i], arg)
+		}
+	}
+
+	sendKeysArgs := calls[1]
+	expectedSendKeys := []string{"tmux", "send-keys", "-t", "cb_test:claude", "claude", "Enter"}
+	if len(sendKeysArgs) != len(expectedSendKeys) {
+		t.Fatalf("send-keys args = %v, want %v", sendKeysArgs, expectedSendKeys)
+	}
+	for i, arg := range expectedSendKeys {
+		if sendKeysArgs[i] != arg {
+			t.Errorf("send-keys arg[%d] = %q, want %q", i, sendKeysArgs[i], arg)
+		}
+	}
+}
+
 func TestClient_AttachSession_Error(t *testing.T) {
 	client := &Client{
 		execInteractive: func(name string, args ...string) error {
