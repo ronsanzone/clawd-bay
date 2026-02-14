@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/rsanzone/clawdbay/internal/tmux"
@@ -52,21 +51,11 @@ func runClaude(cmd *cobra.Command, args []string) error {
 
 	// If not in a cb_ session, try to find one matching this directory
 	if sessionName == "" {
-		sessions, err := tmuxClient.ListSessions()
-		if err != nil {
-			return fmt.Errorf("failed to list sessions: %w", err)
+		resolvedSessionName, _, resolveErr := resolveSessionForCWD(tmuxClient, cwd)
+		if resolveErr != nil {
+			return fmt.Errorf("no cb_ session found for this directory. Run 'cb start' first: %w", resolveErr)
 		}
-
-		// Worktree paths follow: <project>-<ticket>-<title>
-		// Session names follow: cb_<ticket>-<title>
-		dirName := filepath.Base(cwd)
-		for _, s := range sessions {
-			sessionSuffix := strings.TrimPrefix(s.Name, "cb_")
-			if strings.Contains(dirName, sessionSuffix) {
-				sessionName = s.Name
-				break
-			}
-		}
+		sessionName = resolvedSessionName
 	}
 
 	if sessionName == "" {

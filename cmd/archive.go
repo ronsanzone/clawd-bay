@@ -16,6 +16,7 @@ var archiveCmd = &cobra.Command{
 	Use:   "archive [session-name]",
 	Short: "Archive workflow (kill session + remove worktree, keep branch)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		tmuxClient := tmux.NewClient()
 		var sessionName string
 		var worktreePath string
 
@@ -26,7 +27,6 @@ var archiveCmd = &cobra.Command{
 			}
 
 			// Try to find worktree path from session's pane
-			tmuxClient := tmux.NewClient()
 			paneDir := tmuxClient.GetPaneWorkingDir(sessionName)
 			if paneDir != "" {
 				worktreePath = paneDir
@@ -37,26 +37,12 @@ var archiveCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to get current directory: %w", err)
 			}
-			worktreePath = cwd
-
-			tmuxClient := tmux.NewClient()
-			sessions, err := tmuxClient.ListSessions()
-			if err != nil {
-				return fmt.Errorf("failed to list sessions: %w", err)
+			resolvedSessionName, resolvedWorktreePath, resolveErr := resolveSessionForCWD(tmuxClient, cwd)
+			if resolveErr != nil {
+				return resolveErr
 			}
-
-			dirName := filepath.Base(cwd)
-			for _, s := range sessions {
-				sessionSuffix := strings.TrimPrefix(s.Name, "cb_")
-				if strings.Contains(dirName, sessionSuffix) {
-					sessionName = s.Name
-					break
-				}
-			}
-
-			if sessionName == "" {
-				return fmt.Errorf("no cb_ session found for directory %s", dirName)
-			}
+			sessionName = resolvedSessionName
+			worktreePath = resolvedWorktreePath
 		}
 
 		// Confirm
