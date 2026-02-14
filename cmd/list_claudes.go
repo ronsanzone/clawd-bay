@@ -23,9 +23,9 @@ func (l listClaudesOut) toString() string {
 
 	var claudeStatus = ""
 	if l.isClaudeSession {
-		claudeStatus = "DETECTED AGENT: claudeStatus: NONE"
-	} else {
 		claudeStatus = "claudeStatus: " + string(l.claudeStatus)
+	} else {
+		claudeStatus = "DETECTED AGENT: NONE"
 	}
 
 	return fmt.Sprintf("%s %s (%s)\n", l.windowName, repoName, claudeStatus)
@@ -74,9 +74,10 @@ var listClaudesCmd = &cobra.Command{
 					}
 				}
 			}
-			for _, o := range output {
-				fmt.Printf(o.toString())
-			}
+		}
+
+		for _, o := range output {
+			fmt.Print(o.toString())
 		}
 		return nil
 	},
