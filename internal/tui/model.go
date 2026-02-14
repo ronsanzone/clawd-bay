@@ -64,19 +64,24 @@ type TreeNode struct {
 
 // Model is the Bubbletea model for the dashboard.
 type Model struct {
-	Groups         []RepoGroup
-	Cursor         int
-	Nodes          []TreeNode
-	Quitting       bool
-	TmuxClient     *tmux.Client
-	SelectedName   string
-	SelectedWindow string
-	WindowStatuses map[string]tmux.Status
-	Width          int
-	Height         int
-	ScrollOffset   int
-	Styles         Styles
-	StatusMsg      string // transient feedback message shown in status bar
+	Groups              []RepoGroup
+	Cursor              int
+	Nodes               []TreeNode
+	FilterMode          bool
+	FilterQuery         string
+	FilteredNodes       []TreeNode
+	FilteredCursor      int
+	Quitting            bool
+	TmuxClient          *tmux.Client
+	SelectedName        string
+	SelectedWindow      string
+	SelectedWindowIndex int
+	WindowStatuses      map[string]tmux.Status
+	Width               int
+	Height              int
+	ScrollOffset        int
+	Styles              Styles
+	StatusMsg           string // transient feedback message shown in status bar
 }
 
 // RollupStatus returns the most active status from a slice.
@@ -235,10 +240,11 @@ func CursorToLine(nodes []TreeNode, cursor int) int {
 // InitialModel creates the initial dashboard model.
 func InitialModel(tmuxClient *tmux.Client) Model {
 	return Model{
-		Groups:         []RepoGroup{},
-		TmuxClient:     tmuxClient,
-		WindowStatuses: make(map[string]tmux.Status),
-		Styles:         NewStyles(KanagawaClaw),
+		Groups:              []RepoGroup{},
+		TmuxClient:          tmuxClient,
+		WindowStatuses:      make(map[string]tmux.Status),
+		SelectedWindowIndex: -1,
+		Styles:              NewStyles(KanagawaClaw),
 	}
 }
 
@@ -305,9 +311,22 @@ func (m *Model) adjustScroll() {
 	if treeHeight < 1 {
 		return
 	}
-	cursorLine := CursorToLine(m.Nodes, m.Cursor)
+
+	activeNodes := m.nodesForView()
+	if len(activeNodes) == 0 {
+		m.ScrollOffset = 0
+		return
+	}
+
+	cursorLine := m.cursorForView()
+	lineCount := len(activeNodes)
+	if !m.FilterMode {
+		cursorLine = CursorToLine(activeNodes, cursorLine)
+		lineCount = m.totalDisplayLines()
+	}
+
 	_, _, m.ScrollOffset = VisibleRange(
-		m.totalDisplayLines(), treeHeight, cursorLine, m.ScrollOffset,
+		lineCount, treeHeight, cursorLine, m.ScrollOffset,
 	)
 }
 
@@ -329,6 +348,59 @@ func (m Model) totalDisplayLines() int {
 	return count
 }
 
+func (m *Model) updateFilteredNodes() {
+	query := strings.ToLower(strings.TrimSpace(m.FilterQuery))
+	if query == "" {
+		m.FilteredNodes = append([]TreeNode(nil), m.Nodes...)
+	} else {
+		m.FilteredNodes = m.FilteredNodes[:0]
+		for _, node := range m.Nodes {
+			if strings.Contains(strings.ToLower(m.filterSearchText(node)), query) {
+				m.FilteredNodes = append(m.FilteredNodes, node)
+			}
+		}
+	}
+
+	if m.FilteredCursor >= len(m.FilteredNodes) {
+		m.FilteredCursor = max(0, len(m.FilteredNodes)-1)
+	}
+	if m.FilteredCursor < 0 {
+		m.FilteredCursor = 0
+	}
+}
+
+func (m Model) filterSearchText(node TreeNode) string {
+	switch node.Type {
+	case NodeRepo:
+		return m.Groups[node.RepoIndex].Name
+	case NodeSession:
+		group := m.Groups[node.RepoIndex]
+		session := group.Sessions[node.SessionIndex]
+		return session.Name + " " + group.Name
+	case NodeWindow:
+		group := m.Groups[node.RepoIndex]
+		session := group.Sessions[node.SessionIndex]
+		window := session.Windows[node.WindowIndex]
+		return window.Name + " " + session.Name + " " + group.Name
+	default:
+		return ""
+	}
+}
+
+func (m Model) nodesForView() []TreeNode {
+	if m.FilterMode {
+		return m.FilteredNodes
+	}
+	return m.Nodes
+}
+
+func (m Model) cursorForView() int {
+	if m.FilterMode {
+		return m.FilteredCursor
+	}
+	return m.Cursor
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -336,6 +408,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Groups = mergeExpandState(m.Groups, msg.Groups)
 		m.WindowStatuses = msg.WindowStatuses
 		m.Nodes = BuildNodes(m.Groups)
+		if m.FilterMode {
+			m.updateFilteredNodes()
+		}
 		if m.Cursor >= len(m.Nodes) {
 			m.Cursor = max(0, len(m.Nodes)-1)
 		}
@@ -360,6 +435,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.FilterMode {
+			switch msg.String() {
+			case "esc":
+				m.FilterMode = false
+				m.FilterQuery = ""
+				m.FilteredNodes = nil
+				m.FilteredCursor = 0
+				m.adjustScroll()
+				return m, nil
+			case "backspace", "ctrl+h":
+				if m.FilterQuery != "" {
+					runes := []rune(m.FilterQuery)
+					m.FilterQuery = string(runes[:len(runes)-1])
+				}
+				m.updateFilteredNodes()
+				m.adjustScroll()
+				return m, nil
+			case "up", "k":
+				if m.FilteredCursor > 0 {
+					m.FilteredCursor--
+					m.adjustScroll()
+				}
+				return m, nil
+			case "down", "j":
+				if m.FilteredCursor < len(m.FilteredNodes)-1 {
+					m.FilteredCursor++
+					m.adjustScroll()
+				}
+				return m, nil
+			case "enter":
+				return m.handleEnter()
+			}
+
+			if len(msg.Runes) > 0 {
+				m.FilterQuery += string(msg.Runes)
+				m.updateFilteredNodes()
+				m.adjustScroll()
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.Quitting = true
@@ -384,6 +500,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleAddClaude()
 		case "r":
 			return m, m.refreshCmd()
+		case "/":
+			m.FilterMode = true
+			m.FilterQuery = ""
+			m.FilteredCursor = 0
+			m.updateFilteredNodes()
+			m.adjustScroll()
 		}
 	}
 	return m, nil
@@ -415,25 +537,32 @@ func mergeExpandState(old, updated []RepoGroup) []RepoGroup {
 }
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.Cursor >= len(m.Nodes) {
+	activeNodes := m.nodesForView()
+	activeCursor := m.cursorForView()
+	if activeCursor >= len(activeNodes) {
 		return m, nil
 	}
-	node := m.Nodes[m.Cursor]
+	node := activeNodes[activeCursor]
 
 	switch node.Type {
 	case NodeRepo:
 		m.Groups[node.RepoIndex].Expanded = !m.Groups[node.RepoIndex].Expanded
 		m.Nodes = BuildNodes(m.Groups)
+		if m.FilterMode {
+			m.updateFilteredNodes()
+		}
 		m.adjustScroll()
 	case NodeSession:
 		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
 		m.SelectedName = session.Name
+		m.SelectedWindowIndex = -1
 		return m, tea.Quit
 	case NodeWindow:
 		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
 		m.SelectedName = session.Name
 		m.SelectedWindow = window.Name
+		m.SelectedWindowIndex = window.Index
 		return m, tea.Quit
 	}
 	return m, nil

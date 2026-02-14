@@ -435,6 +435,81 @@ func TestClient_SwitchClient_Error(t *testing.T) {
 	}
 }
 
+func TestClient_SelectWindow(t *testing.T) {
+	var capturedArgs []string
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			capturedArgs = append([]string{name}, args...)
+			return nil, nil
+		},
+	}
+
+	err := client.SelectWindow("cb_test", 3)
+	if err != nil {
+		t.Fatalf("SelectWindow() error = %v", err)
+	}
+
+	expected := []string{"tmux", "select-window", "-t", "cb_test:3"}
+	if len(capturedArgs) != len(expected) {
+		t.Fatalf("args = %v, want %v", capturedArgs, expected)
+	}
+	for i, arg := range expected {
+		if capturedArgs[i] != arg {
+			t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+		}
+	}
+}
+
+func TestClient_AttachOrSwitchToSession(t *testing.T) {
+	t.Run("switches when inside tmux", func(t *testing.T) {
+		var capturedArgs []string
+		client := &Client{
+			execInteractive: func(name string, args ...string) error {
+				capturedArgs = append([]string{name}, args...)
+				return nil
+			},
+		}
+
+		if err := client.AttachOrSwitchToSession("cb_test", true); err != nil {
+			t.Fatalf("AttachOrSwitchToSession() error = %v", err)
+		}
+
+		expected := []string{"tmux", "switch-client", "-t", "cb_test"}
+		if len(capturedArgs) != len(expected) {
+			t.Fatalf("args = %v, want %v", capturedArgs, expected)
+		}
+		for i, arg := range expected {
+			if capturedArgs[i] != arg {
+				t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+			}
+		}
+	})
+
+	t.Run("attaches when outside tmux", func(t *testing.T) {
+		var capturedArgs []string
+		client := &Client{
+			execInteractive: func(name string, args ...string) error {
+				capturedArgs = append([]string{name}, args...)
+				return nil
+			},
+		}
+
+		if err := client.AttachOrSwitchToSession("cb_test", false); err != nil {
+			t.Fatalf("AttachOrSwitchToSession() error = %v", err)
+		}
+
+		expected := []string{"tmux", "attach-session", "-t", "cb_test"}
+		if len(capturedArgs) != len(expected) {
+			t.Fatalf("args = %v, want %v", capturedArgs, expected)
+		}
+		for i, arg := range expected {
+			if capturedArgs[i] != arg {
+				t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+			}
+		}
+	})
+}
+
 func TestClient_GetPaneWorkingDir(t *testing.T) {
 	tests := []struct {
 		name     string

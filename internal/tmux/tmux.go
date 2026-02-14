@@ -447,6 +447,25 @@ func (c *Client) SwitchClient(name string) error {
 	return nil
 }
 
+// AttachOrSwitchToSession switches the current tmux client if already inside
+// tmux, otherwise attaches a new client.
+func (c *Client) AttachOrSwitchToSession(name string, inTmux bool) error {
+	if inTmux {
+		return c.SwitchClient(name)
+	}
+	return c.AttachSession(name)
+}
+
+// SelectWindow selects a window by index inside a session.
+func (c *Client) SelectWindow(session string, windowIndex int) error {
+	target := fmt.Sprintf("%s:%d", session, windowIndex)
+	_, err := c.execCommand("tmux", "select-window", "-t", target)
+	if err != nil {
+		return fmt.Errorf("failed to select window %d in session %s: %w", windowIndex, session, err)
+	}
+	return nil
+}
+
 // GetPaneWorkingDir returns the working directory of the first pane in a session.
 // Returns empty string on error.
 func (c *Client) GetPaneWorkingDir(session string) string {
