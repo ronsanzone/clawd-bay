@@ -122,14 +122,17 @@ func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
 	case NodeWindow:
 		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
+		key := session.Name + ":" + window.Name
 		badge := " "
-		if strings.HasPrefix(window.Name, "claude") {
-			key := session.Name + ":" + window.Name
-			if status, ok := m.WindowStatuses[key]; ok {
-				badge = m.renderStatusBadge(status)
-			}
+		if status, ok := m.WindowStatuses[key]; ok {
+			badge = m.renderStatusBadge(status)
 		}
-		line = cursor + "      " + badge + " " + m.Styles.Window.Render(window.Name)
+		tag := m.renderAgentTag(m.WindowAgentTypes[key])
+		if tag != "" {
+			line = cursor + "      " + badge + " " + tag + " " + m.Styles.Window.Render(window.Name)
+		} else {
+			line = cursor + "      " + badge + " " + m.Styles.Window.Render(window.Name)
+		}
 
 	default:
 		line = cursor + "Unknown"
@@ -140,6 +143,19 @@ func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
 	}
 
 	return line
+}
+
+func (m Model) renderAgentTag(agentType tmux.AgentType) string {
+	switch agentType {
+	case tmux.AgentClaude:
+		return m.Styles.StatusBar.Render("[CLAUDE]")
+	case tmux.AgentCodex:
+		return m.Styles.StatusBar.Render("[CODEX]")
+	case tmux.AgentOpenCode:
+		return m.Styles.StatusBar.Render("[OPEN]")
+	default:
+		return ""
+	}
 }
 
 // rightAlign aligns the right string to the right edge.

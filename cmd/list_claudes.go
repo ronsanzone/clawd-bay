@@ -8,11 +8,12 @@ import (
 )
 
 type listClaudesOut struct {
-	repoName        string
-	isWorktree      bool
-	windowName      string
-	isClaudeSession bool
-	claudeStatus    tmux.Status
+	repoName    string
+	isWorktree  bool
+	windowName  string
+	agentType   tmux.AgentType
+	isAgent     bool
+	agentStatus tmux.Status
 }
 
 func (l listClaudesOut) toString() string {
@@ -21,14 +22,14 @@ func (l listClaudesOut) toString() string {
 		repoName = repoName + " (wt)"
 	}
 
-	var claudeStatus = ""
-	if l.isClaudeSession {
-		claudeStatus = "claudeStatus: " + string(l.claudeStatus)
+	var agentStatus = ""
+	if l.isAgent {
+		agentStatus = "agentType: " + string(l.agentType) + " status: " + string(l.agentStatus)
 	} else {
-		claudeStatus = "DETECTED AGENT: NONE"
+		agentStatus = "DETECTED AGENT: NONE"
 	}
 
-	return fmt.Sprintf("%s %s (%s)\n", l.windowName, repoName, claudeStatus)
+	return fmt.Sprintf("%s %s (%s)\n", l.windowName, repoName, agentStatus)
 }
 
 var listClaudesCmd = &cobra.Command{
@@ -64,12 +65,14 @@ var listClaudesCmd = &cobra.Command{
 				if winErr == nil {
 					for _, w := range wins {
 						out := listClaudesOut{
-							repoName:        repoName,
-							isWorktree:      false,
-							windowName:      w.Name,
-							isClaudeSession: tmuxClient.DetectAgentProcess(s.Name, w.Name),
-							claudeStatus:    tmuxClient.GetPaneStatus(s.Name, w.Name),
+							repoName:   repoName,
+							isWorktree: false,
+							windowName: w.Name,
 						}
+						info := tmuxClient.DetectAgentInfo(s.Name, w.Name)
+						out.agentType = info.Type
+						out.isAgent = info.Detected
+						out.agentStatus = info.Status
 						output = append(output, out)
 					}
 				}

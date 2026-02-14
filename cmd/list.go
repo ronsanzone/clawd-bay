@@ -7,6 +7,43 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type listAgentDetector interface {
+	DetectAgentInfo(session, window string) tmux.AgentInfo
+}
+
+func rollupStatuses(statuses []tmux.Status) tmux.Status {
+	hasWaiting := false
+	hasIdle := false
+	for _, s := range statuses {
+		switch s {
+		case tmux.StatusWorking:
+			return tmux.StatusWorking
+		case tmux.StatusWaiting:
+			hasWaiting = true
+		case tmux.StatusIdle:
+			hasIdle = true
+		}
+	}
+	if hasWaiting {
+		return tmux.StatusWaiting
+	}
+	if hasIdle {
+		return tmux.StatusIdle
+	}
+	return tmux.StatusDone
+}
+
+func sessionStatusFromWindows(detector listAgentDetector, session string, wins []tmux.Window) tmux.Status {
+	var statuses []tmux.Status
+	for _, w := range wins {
+		info := detector.DetectAgentInfo(session, w.Name)
+		if info.Detected {
+			statuses = append(statuses, info.Status)
+		}
+	}
+	return rollupStatuses(statuses)
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all active ClawdBay sessions",
@@ -44,26 +81,9 @@ var listCmd = &cobra.Command{
 				}
 
 				// Get rolled-up status
-				var statuses []tmux.Status
-				if winErr == nil {
-					for _, w := range wins {
-						if w.IsClaudeSession() {
-							statuses = append(statuses, tmuxClient.GetPaneStatus(s.Name, w.Name))
-						}
-					}
-				}
-
 				status := tmux.StatusDone
-				if len(statuses) > 0 {
-					for _, st := range statuses {
-						if st == tmux.StatusWorking {
-							status = tmux.StatusWorking
-							break
-						}
-						if st == tmux.StatusIdle {
-							status = tmux.StatusIdle
-						}
-					}
+				if winErr == nil {
+					status = sessionStatusFromWindows(tmuxClient, s.Name, wins)
 				}
 
 				windowWord := "windows"

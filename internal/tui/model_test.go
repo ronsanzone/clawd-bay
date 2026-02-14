@@ -653,3 +653,49 @@ func TestFilterEnterSelectsWindowByIndex(t *testing.T) {
 		t.Fatalf("SelectedWindowIndex = %d, want %d", result.SelectedWindowIndex, 7)
 	}
 }
+
+func TestUpdateRefreshMsgSetsWindowAgentTypes(t *testing.T) {
+	m := Model{
+		Styles:              NewStyles(KanagawaClaw),
+		WindowStatuses:      make(map[string]tmux.Status),
+		WindowAgentTypes:    make(map[string]tmux.AgentType),
+		SelectedWindowIndex: -1,
+		Width:               80,
+		Height:              24,
+	}
+
+	msg := refreshMsg{
+		Groups: []RepoGroup{
+			{
+				Name: "repo",
+				Sessions: []WorktreeSession{
+					{
+						Name:   "cb_demo",
+						Status: tmux.StatusWorking,
+						Windows: []tmux.Window{
+							{Index: 1, Name: "custom-window"},
+						},
+						Expanded: true,
+					},
+				},
+				Expanded: true,
+			},
+		},
+		WindowStatuses: map[string]tmux.Status{
+			"cb_demo:custom-window": tmux.StatusWorking,
+		},
+		WindowAgents: map[string]tmux.AgentType{
+			"cb_demo:custom-window": tmux.AgentCodex,
+		},
+	}
+
+	updated, _ := m.Update(msg)
+	out := updated.(Model)
+
+	if got := out.WindowAgentTypes["cb_demo:custom-window"]; got != tmux.AgentCodex {
+		t.Fatalf("WindowAgentTypes[cb_demo:custom-window] = %q, want %q", got, tmux.AgentCodex)
+	}
+	if got := out.WindowStatuses["cb_demo:custom-window"]; got != tmux.StatusWorking {
+		t.Fatalf("WindowStatuses[cb_demo:custom-window] = %q, want %q", got, tmux.StatusWorking)
+	}
+}

@@ -19,6 +19,7 @@ type tickMsg time.Time
 type refreshMsg struct {
 	Groups         []RepoGroup
 	WindowStatuses map[string]tmux.Status
+	WindowAgents   map[string]tmux.AgentType
 }
 
 // claudeWindowMsg is sent after attempting to create a Claude window.
@@ -77,6 +78,7 @@ type Model struct {
 	SelectedWindow      string
 	SelectedWindowIndex int
 	WindowStatuses      map[string]tmux.Status
+	WindowAgentTypes    map[string]tmux.AgentType
 	Width               int
 	Height              int
 	ScrollOffset        int
@@ -243,6 +245,7 @@ func InitialModel(tmuxClient *tmux.Client) Model {
 		Groups:              []RepoGroup{},
 		TmuxClient:          tmuxClient,
 		WindowStatuses:      make(map[string]tmux.Status),
+		WindowAgentTypes:    make(map[string]tmux.AgentType),
 		SelectedWindowIndex: -1,
 		Styles:              NewStyles(KanagawaClaw),
 	}
@@ -261,29 +264,30 @@ func (m Model) tickCmd() tea.Cmd {
 
 func (m Model) refreshCmd() tea.Cmd {
 	return func() tea.Msg {
-		groups, statuses := fetchGroups(m.TmuxClient)
-		return refreshMsg{Groups: groups, WindowStatuses: statuses}
+		groups, statuses, agents := fetchGroups(m.TmuxClient)
+		return refreshMsg{Groups: groups, WindowStatuses: statuses, WindowAgents: agents}
 	}
 }
 
 // fetchGroups queries tmux for all data.
-func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status) {
+func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status, map[string]tmux.AgentType) {
 	slog.Debug("fetchGroups called")
 	if tmuxClient == nil {
 		slog.Debug("fetchGroups: tmuxClient is nil")
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	sessions, err := tmuxClient.ListSessions()
 	if err != nil {
 		slog.Debug("fetchGroups: ListSessions failed", "err", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	slog.Debug("fetchGroups: found sessions", "count", len(sessions))
 
 	repoNames := make(map[string]string)
 	windowMap := make(map[string][]tmux.Window)
 	statusMap := make(map[string]tmux.Status)
+	agentMap := make(map[string]tmux.AgentType)
 
 	for _, s := range sessions {
 		repoNames[s.Name] = tmuxClient.GetRepoName(s.Name)
@@ -295,14 +299,16 @@ func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status) 
 		windowMap[s.Name] = wins
 
 		for _, w := range wins {
-			if strings.HasPrefix(w.Name, "claude") {
-				slog.Debug("fetchGroups: checking claude window", "session", s.Name, "window", w.Name)
-				statusMap[s.Name+":"+w.Name] = tmuxClient.GetPaneStatus(s.Name, w.Name)
+			key := s.Name + ":" + w.Name
+			info := tmuxClient.DetectAgentInfo(s.Name, w.Name)
+			if info.Detected {
+				statusMap[key] = info.Status
+				agentMap[key] = info.Type
 			}
 		}
 	}
 
-	return GroupByRepo(sessions, repoNames, windowMap, statusMap), statusMap
+	return GroupByRepo(sessions, repoNames, windowMap, statusMap), statusMap, agentMap
 }
 
 // adjustScroll updates ScrollOffset to keep cursor visible in the viewport.
@@ -407,6 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m.Groups = mergeExpandState(m.Groups, msg.Groups)
 		m.WindowStatuses = msg.WindowStatuses
+		m.WindowAgentTypes = msg.WindowAgents
 		m.Nodes = BuildNodes(m.Groups)
 		if m.FilterMode {
 			m.updateFilteredNodes()

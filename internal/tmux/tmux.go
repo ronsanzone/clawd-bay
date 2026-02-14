@@ -20,21 +20,45 @@ type Window struct {
 	Active bool
 }
 
-// Status represents a Claude session's current state.
+// AgentType identifies which coding agent process is active in a pane.
+type AgentType string
+
+const (
+	AgentNone     AgentType = "none"
+	AgentClaude   AgentType = "claude"
+	AgentCodex    AgentType = "codex"
+	AgentOpenCode AgentType = "open_code"
+)
+
+// AgentInfo bundles the detected agent and its current status.
+type AgentInfo struct {
+	Type     AgentType
+	Detected bool
+	Status   Status
+}
+
+// Status represents a coding agent session's current state.
 type Status string
 
 const (
-	// StatusWorking indicates Claude is actively processing a task.
+	// StatusWorking indicates the agent is actively processing a task.
 	StatusWorking Status = "WORKING"
-	// StatusWaiting indicates Claude needs user input (permission prompt, etc).
+	// StatusWaiting indicates the agent needs user input (permission prompt, etc).
 	StatusWaiting Status = "WAITING"
-	// StatusIdle indicates Claude is running but not actively working.
+	// StatusIdle indicates the agent is running but not actively working.
 	StatusIdle Status = "IDLE"
-	// StatusDone indicates Claude has exited or the session is complete.
+	// StatusDone indicates the agent has exited or the session is complete.
 	StatusDone Status = "DONE"
 )
 
-var agentProcessNames = []string{"claude"}
+var agentProcessSignatures = []struct {
+	agent      AgentType
+	signatures []string
+}{
+	{agent: AgentClaude, signatures: []string{"claude"}},
+	{agent: AgentCodex, signatures: []string{"codex"}},
+	{agent: AgentOpenCode, signatures: []string{"open-code", "open_code", "opencode"}},
+}
 
 // Client provides tmux operations.
 type Client struct {
@@ -145,11 +169,6 @@ func ParseSessionList(output string) []Session {
 	return sessions
 }
 
-// IsClaudeSession returns true if this window is a Claude session.
-func (w *Window) IsClaudeSession() bool {
-	return strings.HasPrefix(w.Name, "claude:")
-}
-
 // ParseWindowList parses output from:
 // tmux list-windows -F "#{window_index}:#{window_name}:#{window_active}"
 // Format: "0:shell:1" or "1:claude:default:0"
@@ -194,48 +213,68 @@ func ParseWindowList(output string) []Window {
 }
 
 func (c *Client) DetectAgentProcess(session, window string) bool {
+	return c.DetectAgentType(session, window) != AgentNone
+}
+
+// DetectAgentType returns the detected agent type for a tmux window pane.
+func (c *Client) DetectAgentType(session, window string) AgentType {
 	target := session + ":" + window
+	return c.detectAgentTypeForTarget(target)
+}
+
+func (c *Client) detectAgentTypeForTarget(target string) AgentType {
 	paneTty, err := c.getDisplayMessage(target, "#{pane_tty}")
 	if err != nil {
 		slog.Debug("DetectAgentProcess getDisplayMessage failed", "target", target, "err", err)
-		return false
+		return AgentNone
 	}
 
 	output, err := c.execCommand("ps", "-t", paneTty)
 	if err != nil {
 		slog.Debug("DetectAgentProcess ps failed", "target", target, "err", err)
-		return false
+		return AgentNone
 	}
 
-	processStr := strings.TrimSpace(string(output))
-
-	for _, v := range agentProcessNames {
-		if strings.Contains(processStr, v) {
-			return true
+	processStr := strings.ToLower(strings.TrimSpace(string(output)))
+	for _, profile := range agentProcessSignatures {
+		for _, sig := range profile.signatures {
+			if strings.Contains(processStr, strings.ToLower(sig)) {
+				return profile.agent
+			}
 		}
 	}
-	return false
+	return AgentNone
 }
 
-// GetPaneStatus detects if a Claude session is IDLE, WORKING, or DONE
-// by checking the pane's current command and inspecting pane content.
-func (c *Client) GetPaneStatus(session, window string) Status {
+// DetectAgentInfo returns the detected agent type and derived pane status.
+func (c *Client) DetectAgentInfo(session, window string) AgentInfo {
 	target := session + ":" + window
 	cmd, err := c.getDisplayMessage(target, "#{pane_current_command}")
 	if err != nil {
-		slog.Debug("GetPaneStatus: getDisplayMessage failed", "target", target, "err", err)
-		return StatusDone
+		slog.Debug("DetectAgentInfo: getDisplayMessage failed", "target", target, "err", err)
+		return AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone}
 	}
 
-	slog.Debug("GetPaneStatus", "target", target, "pane_command", cmd)
-
-	// If the pane is running a shell, Claude has exited
+	// If the pane is running a shell, no coding agent is active.
 	if cmd == "zsh" || cmd == "bash" || cmd == "sh" {
-		return StatusDone
+		return AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone}
 	}
 
-	// Something is running in this claude window — inspect pane content
-	return c.detectClaudeActivity(target)
+	agentType := c.detectAgentTypeForTarget(target)
+	if agentType == AgentNone {
+		return AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone}
+	}
+
+	return AgentInfo{
+		Type:     agentType,
+		Detected: true,
+		Status:   c.detectAgentActivity(target),
+	}
+}
+
+// GetPaneStatus detects if an agent session is IDLE, WORKING, WAITING, or DONE.
+func (c *Client) GetPaneStatus(session, window string) Status {
+	return c.DetectAgentInfo(session, window).Status
 }
 
 // getDisplayMessage executes a display-message call with a given printFilter
@@ -249,23 +288,23 @@ func (c *Client) getDisplayMessage(target string, printFilter string) (string, e
 	return strings.TrimSpace(string(output)), nil
 }
 
-// detectClaudeActivity inspects the last few lines of a pane to determine
-// Claude Code's current state: actively working, waiting for input, or idle.
+// detectAgentActivity inspects the last few lines of a pane to determine
+// an agent's current state: actively working, waiting for input, or idle.
 //
 // Detection priority (matches agent-deck approach):
 //  1. Busy indicators (spinners, interrupt messages) → WORKING
 //  2. Prompt indicators (permission dialogs, input prompts) → WAITING
 //  3. Default → IDLE
-func (c *Client) detectClaudeActivity(target string) Status {
-	slog.Debug("detectClaudeActivity", "target", target)
+func (c *Client) detectAgentActivity(target string) Status {
+	slog.Debug("detectAgentActivity", "target", target)
 	output, err := c.execCommand("tmux", "capture-pane", "-t", target, "-p", "-S", "20")
 	if err != nil {
-		slog.Debug("detectClaudeActivity", "tmux err", err)
+		slog.Debug("detectAgentActivity", "tmux err", err)
 		return StatusIdle
 	}
 
 	content := string(output)
-	slog.Debug("detectClaudeActivity", "target", target, "content", content)
+	slog.Debug("detectAgentActivity", "target", target, "content", content)
 
 	// Priority 1: Check busy indicators
 	if hasBusyIndicator(content) {

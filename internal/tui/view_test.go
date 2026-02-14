@@ -172,3 +172,79 @@ func TestViewFilterModeHint(t *testing.T) {
 		t.Fatalf("view missing no matches message: %q", view)
 	}
 }
+
+func TestRenderNodeLineWindowIncludesAgentTag(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{
+						Name:     "cb_demo",
+						Expanded: true,
+						Windows: []tmux.Window{
+							{Index: 3, Name: "workbench"},
+						},
+					},
+				},
+			},
+		},
+		WindowStatuses: map[string]tmux.Status{
+			"cb_demo:workbench": tmux.StatusWorking,
+		},
+		WindowAgentTypes: map[string]tmux.AgentType{
+			"cb_demo:workbench": tmux.AgentCodex,
+		},
+		Styles: NewStyles(KanagawaClaw),
+		Width:  80,
+		Cursor: 2,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	line := m.renderNodeLine(m.Nodes[2], 2)
+	if !strings.Contains(line, "[CODEX]") {
+		t.Fatalf("window line missing [CODEX] tag: %q", line)
+	}
+	if !strings.Contains(line, "•") {
+		t.Fatalf("window line missing status badge: %q", line)
+	}
+}
+
+func TestRenderNodeLineWindowNoAgentTagForNone(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Sessions: []WorktreeSession{
+					{
+						Name:     "cb_demo",
+						Expanded: true,
+						Windows: []tmux.Window{
+							{Index: 1, Name: "shell"},
+						},
+					},
+				},
+			},
+		},
+		WindowStatuses: map[string]tmux.Status{
+			"cb_demo:shell": tmux.StatusDone,
+		},
+		WindowAgentTypes: map[string]tmux.AgentType{
+			"cb_demo:shell": tmux.AgentNone,
+		},
+		Styles: NewStyles(KanagawaClaw),
+		Width:  80,
+		Cursor: 2,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	line := m.renderNodeLine(m.Nodes[2], 2)
+	if strings.Contains(line, "[CLAUDE]") || strings.Contains(line, "[CODEX]") || strings.Contains(line, "[OPEN]") {
+		t.Fatalf("window line should not contain agent tag: %q", line)
+	}
+	if !strings.Contains(line, "·") {
+		t.Fatalf("window line missing status badge for done: %q", line)
+	}
+}

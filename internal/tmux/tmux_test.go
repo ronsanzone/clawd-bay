@@ -91,22 +91,151 @@ func TestParseWindowList(t *testing.T) {
 	}
 }
 
-func TestWindow_IsClaudeSession(t *testing.T) {
+func TestClient_DetectAgentType(t *testing.T) {
 	tests := []struct {
-		name string
-		want bool
+		name       string
+		paneTTY    string
+		psOutput   string
+		displayErr error
+		psErr      error
+		want       AgentType
 	}{
-		{"shell", false},
-		{"claude:default", true},
-		{"claude:research", true},
-		{"vim", false},
+		{
+			name:     "detect claude",
+			paneTTY:  "/dev/ttys001",
+			psOutput: "1234 ttys001  0:00.10 Claude",
+			want:     AgentClaude,
+		},
+		{
+			name:     "detect codex",
+			paneTTY:  "/dev/ttys001",
+			psOutput: "1234 ttys001  0:00.10 codex",
+			want:     AgentCodex,
+		},
+		{
+			name:     "detect open code",
+			paneTTY:  "/dev/ttys001",
+			psOutput: "1234 ttys001  0:00.10 open-code",
+			want:     AgentOpenCode,
+		},
+		{
+			name:     "none when no matching process",
+			paneTTY:  "/dev/ttys001",
+			psOutput: "1234 ttys001  0:00.10 vim",
+			want:     AgentNone,
+		},
+		{
+			name:       "none on pane tty error",
+			displayErr: errors.New("display failed"),
+			want:       AgentNone,
+		},
+		{
+			name:    "none on ps error",
+			paneTTY: "/dev/ttys001",
+			psErr:   errors.New("ps failed"),
+			want:    AgentNone,
+		},
 	}
 
 	for _, tt := range tests {
-		w := Window{Name: tt.name}
-		if got := w.IsClaudeSession(); got != tt.want {
-			t.Errorf("Window{%q}.IsClaudeSession() = %v, want %v", tt.name, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{
+				execCommand: func(name string, args ...string) ([]byte, error) {
+					if name == "tmux" {
+						return []byte(tt.paneTTY), tt.displayErr
+					}
+					if name == "ps" {
+						return []byte(tt.psOutput), tt.psErr
+					}
+					return nil, errors.New("unexpected command")
+				},
+			}
+
+			got := client.DetectAgentType("cb_demo", "random")
+			if got != tt.want {
+				t.Fatalf("DetectAgentType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClient_DetectAgentInfo(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmdOutput   string
+		cmdErr      error
+		psOutput    string
+		psErr       error
+		paneContent string
+		expected    AgentInfo
+	}{
+		{
+			name:        "detected agent working",
+			cmdOutput:   "codex",
+			psOutput:    "1234 ttys001 codex",
+			paneContent: "ctrl+c to interrupt",
+			expected:    AgentInfo{Type: AgentCodex, Detected: true, Status: StatusWorking},
+		},
+		{
+			name:        "detected agent waiting",
+			cmdOutput:   "claude",
+			psOutput:    "1234 ttys001 claude",
+			paneContent: "Continue? (Y/n)",
+			expected:    AgentInfo{Type: AgentClaude, Detected: true, Status: StatusWaiting},
+		},
+		{
+			name:        "detected agent idle",
+			cmdOutput:   "open-code",
+			psOutput:    "1234 ttys001 open-code",
+			paneContent: "all done output",
+			expected:    AgentInfo{Type: AgentOpenCode, Detected: true, Status: StatusIdle},
+		},
+		{
+			name:      "shell command is done",
+			cmdOutput: "zsh",
+			expected:  AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone},
+		},
+		{
+			name:      "no detected process is done",
+			cmdOutput: "python",
+			psOutput:  "1234 ttys001 python",
+			expected:  AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone},
+		},
+		{
+			name:     "display error is done",
+			cmdErr:   errors.New("display failed"),
+			expected: AgentInfo{Type: AgentNone, Detected: false, Status: StatusDone},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{
+				execCommand: func(name string, args ...string) ([]byte, error) {
+					if name == "tmux" && len(args) > 0 {
+						switch args[0] {
+						case "display-message":
+							// pane_current_command query
+							if len(args) > 0 && args[len(args)-1] == "#{pane_current_command}" {
+								return []byte(tt.cmdOutput), tt.cmdErr
+							}
+							// pane_tty query
+							return []byte("/dev/ttys001"), nil
+						case "capture-pane":
+							return []byte(tt.paneContent), nil
+						}
+					}
+					if name == "ps" {
+						return []byte(tt.psOutput), tt.psErr
+					}
+					return nil, errors.New("unexpected command")
+				},
+			}
+			got := client.DetectAgentInfo("session", "window")
+			if got != tt.expected {
+				t.Fatalf("DetectAgentInfo() = %+v, want %+v", got, tt.expected)
+			}
+		})
 	}
 }
 
