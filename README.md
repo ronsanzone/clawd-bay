@@ -1,69 +1,61 @@
 # ClawdBay
 
-A CLI + TUI tool for managing multi-session Claude Code workflows. Stop losing track of Claude sessions across worktrees—start, monitor, and switch between them from one dashboard.
+A CLI + TUI tool for managing multi-session coding-agent workflows across git worktrees and tmux sessions.
 
 ## Quick Start
 
-**Prerequisites:** Go 1.21+, tmux 3.x+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+**Prerequisites:** Go 1.25.7+, tmux 3.x+, and at least one coding agent CLI (`claude`, `codex`, or `open-code`) on your PATH.
 
 ```bash
 # Install
-go install github.com/rsanzone/clawdbay@latest
+make build
 
-# Initialize config and prompt templates
-cb init
+# Configure projects that should appear in dash/list
+cb project add /absolute/path/to/repo-a --name repo-a
 
-# Start your first workflow
-cb start my-feature
-cb claude --name research
+# Start a workflow in a configured repo
+cd /absolute/path/to/repo-a
+cb start feat-auth
+
+# Add another agent window
+cb claude --name review
+
+# Open dashboard
 cb dash
 cb dash --mode agents
 ```
 
-## Core Workflow
+## Core Commands
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  cb start   │────▶│  cb claude  │────▶│   cb dash   │────▶│ cb archive  │
-│  (worktree  │     │  (add       │     │  (monitor   │     │  (cleanup   │
-│   + tmux)   │     │   sessions) │     │   & switch) │     │   when done)│
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-```
-
-**The idea:** Each feature gets an isolated git worktree with a dedicated tmux session. Spin up multiple Claude sessions per worktree (research, implementation, review). The dashboard shows everything at a glance.
-
-## Commands
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `cb start <branch>` | Create worktree + tmux session | `cb start feat-auth` |
-| `cb claude` | Add Claude session to current worktree | `cb claude --name research` |
-| `cb dash` | Interactive dashboard (worktree mode by default) | `cb` |
-| `cb dash --mode agents` | Dashboard listing detected agent windows across tmux sessions | `cb dash --mode agents` |
-| `cb list` | List active workflows | `cb list` |
-| `cb archive` | Clean up workflow (keeps branch) | `cb archive` |
-| `cb prompt list` | Show available templates | `cb prompt list` |
-| `cb prompt add` | Copy template for customization | `cb prompt add research` |
-| `cb init` | Initialize config directory | `cb init` |
+| Command | Description |
+|---------|-------------|
+| `cb start <branch>` | Create `.worktrees/<repo>-<branch>` + tmux session `cb_<branch>` |
+| `cb claude` | Add a Claude window to the matching `cb_` session |
+| `cb dash` / `cb` | Interactive dashboard (project-scoped) |
+| `cb dash --mode agents` | Dashboard listing detected agent windows across all tmux sessions |
+| `cb list` | Non-interactive project/worktree/session tree (project-scoped) |
+| `cb project add/remove/list` | Manage configured project roots |
+| `cb archive [session]` | Kill workflow session + remove worktree (branch preserved) |
+| `cb clist` | List all tmux sessions/windows with agent detection (intentionally unscoped) |
 
 ## Configuration
 
-```
-~/.config/cb/
-└── prompts/           # Prompt templates
-    ├── research.md    # Codebase exploration
-    ├── plan.md        # Implementation planning
-    ├── implement.md   # Code execution
-    └── verify.md      # Testing checklist
+ClawdBay project scope is configured in `~/.config/cb/config.toml`:
+
+```toml
+version = 1
+
+[[projects]]
+path = "/Users/you/code/repo-a"
+name = "repo-a" # optional
 ```
 
-Customize templates by editing files in `~/.config/cb/prompts/`. Per-project prompts go in `.prompts/` within your worktree.
+Notes:
+- Paths are canonicalized via symlink resolution when added.
+- `cb dash` and `cb list` only show configured projects.
+- Sessions running from a configured repo root (outside `.worktrees/`) appear under `(main repo)`.
+- If you run `cb start` from an unconfigured repo, ClawdBay warns that the session will not appear in `cb dash` / `cb list`.
 
 ## Documentation
 
-- [Installation & Command Reference](INSTALL.md) - Full setup and detailed command docs
-- [Design Document](../plans/2025-02-04-clawdbay-design.md) - Architecture and rationale
-
-## License
-
-MIT
+- [Installation & Command Reference](INSTALL.md)

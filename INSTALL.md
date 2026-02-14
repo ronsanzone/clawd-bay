@@ -2,335 +2,151 @@
 
 ## Prerequisites
 
-### Go 1.21+
+- Go 1.25.7+
+- tmux 3.x+
+- A coding agent CLI available in tmux panes (`claude`, `codex`, or `open-code`)
 
-```bash
-# macOS
-brew install go
-
-# Verify
-go version
-```
-
-### tmux 3.x+
-
-```bash
-# macOS
-brew install tmux
-
-# Linux (Debian/Ubuntu)
-sudo apt install tmux
-
-# Verify
-tmux -V
-```
-
-### Claude Code CLI
-
-Install from [Anthropic's documentation](https://docs.anthropic.com/en/docs/claude-code).
-
-```bash
-# Verify
-claude --version
-```
-
-## Installation
-
-### Option 1: Go Install (Recommended)
-
-```bash
-go install github.com/rsanzone/clawdbay@latest
-```
-
-### Option 2: Build from Source
+## Build / Install
 
 ```bash
 git clone https://github.com/rsanzone/clawdbay.git
 cd clawdbay
 make build
-# Or: go build -o cb main.go
-
-# Add to your PATH
-cp cb ~/bin/
-# Or: sudo cp cb /usr/local/bin/
 ```
 
-### Verify Installation
+Run from source:
 
 ```bash
-cb version
-# ClawdBay v0.1.0
-
-cb init
-# Creates ~/.config/cb/prompts/ with default templates
+./cb --help
 ```
 
----
+## Commands
 
-## Command Reference
+### `cb project`
 
-### cb start
-
-Create a git worktree and tmux session for a new workflow.
-
-```
-Usage: cb start <branch-name>
-```
-
-**Examples:**
-```bash
-cb start feat-auth           # Creates worktree + session "cb:feat-auth"
-cb start proj-123-bugfix     # Branch and session name derived from input
-cb start feature/add-login   # Slashes converted to dashes
-```
-
-**What it does:**
-1. Creates git worktree at `../<project>-<branch>/`
-2. Creates tmux session named `cb:<branch>`
-3. Switches to (or attaches) the new session
-
----
-
-### cb claude
-
-Add a Claude Code session to the current worktree.
-
-```
-Usage: cb claude [flags]
-
-Flags:
-  -n, --name <name>      Name for the Claude session (default: "default")
-  -p, --prompt <file>    Prompt file from .prompts/ to execute
-```
-
-**Examples:**
-```bash
-cb claude                           # Creates window "claude:default"
-cb claude --name research           # Creates window "claude:research"
-cb claude -n impl -p implement.md   # Named session with prompt
-```
-
-**Notes:**
-- Must be run from within a `cb:` tmux session or matching worktree
-- Creates a new tmux window and launches `claude` in it
-- With `--prompt`, runs `claude < .prompts/<file>`
-
----
-
-### cb dash
-
-Open the interactive TUI dashboard.
-
-```
-Usage: cb dash
-       cb dash --mode worktree
-       cb dash --mode agents
-       cb        # Alias - runs dash by default
-```
-
-**Dashboard features:**
-- `worktree` mode: shows all `cb_` sessions grouped by repository/worktree
-- `agents` mode: shows detected agent windows across all tmux sessions
-- Displays session/agent status (DONE, IDLE, WAITING, WORKING)
-- Navigate with arrow keys or j/k
-- Press Enter to attach to selected session
-- Press `m` to toggle modes
-- Press q to quit
-
-**Keybindings:**
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `Enter` | Attach to session |
-| `m` | Toggle between `worktree` and `agents` mode |
-| `q` | Quit dashboard |
-
----
-
-### cb list
-
-List all active ClawdBay workflows (non-interactive).
-
-```
-Usage: cb list
-```
-
-**Example output:**
-```
-Active workflows:
-  cb:feat-auth
-  cb:proj-123-bugfix
-  cb:refactor-api
-```
-
----
-
-### cb archive
-
-Archive a workflow by killing the tmux session and removing the worktree. The git branch is preserved.
-
-```
-Usage: cb archive [session-name]
-```
-
-**Examples:**
-```bash
-cb archive                  # Archives current workflow (auto-detected)
-cb archive feat-auth        # Archives specific workflow
-cb archive cb:feat-auth     # Full session name also works
-```
-
-**What it does:**
-1. Prompts for confirmation
-2. Kills the tmux session
-3. Removes the git worktree
-4. Keeps the branch (can be restored later)
-
----
-
-### cb prompt
-
-Manage prompt templates.
-
-#### cb prompt list
-
-List available prompt templates from `~/.config/cb/prompts/`.
+Manage project roots used by `cb dash` and `cb list`.
 
 ```bash
-cb prompt list
-# Available templates:
-#   - research
-#   - plan
-#   - implement
-#   - verify
+cb project add <path> [--name <display>]
+cb project remove <path>
+cb project remove --name <display>
+cb project list
 ```
 
-#### cb prompt add
+Behavior:
+- `add` canonicalizes and persists the project path.
+- `remove <path>` requires canonical-path matching.
+- `remove --name` is explicit and must match exactly one project.
+- `list` shows configured paths and validation status (`OK` / `INVALID`).
 
-Copy a template to `.prompts/` in current directory and open in editor.
+### `cb start`
 
-```
-Usage: cb prompt add <template-name>
-```
+Create a new git worktree and tmux session.
 
 ```bash
-cb prompt add research      # Copies research.md to .prompts/
-cb prompt add plan          # Opens in $EDITOR (default: nvim)
+cb start <branch-name>
+cb start --detach <branch-name>
 ```
 
-#### cb prompt run
+Behavior:
+- Creates worktree at `<repo>/.worktrees/<repo>-<branch>`.
+- Ensures `.worktrees/` exists and is in `.gitignore`.
+- Creates tmux session `cb_<branch>` and a `claude` window.
+- Warns if current repo is not configured in `config.toml`.
 
-Execute a prompt file with Claude.
+### `cb claude`
 
-```
-Usage: cb prompt run <prompt-file>
-```
+Add a Claude window to the matching workflow session.
 
 ```bash
-cb prompt run research.md   # Runs: claude < .prompts/research.md
+cb claude
+cb claude --name review
 ```
 
----
+### `cb dash` (or `cb`)
 
-### cb init
+Open the interactive dashboard.
 
-Initialize ClawdBay configuration and install default prompt templates.
+Hierarchy:
+- Project
+- Worktree
+- Session
+- Window
 
-```
-Usage: cb init
-```
+Scoping:
+- Only configured projects are shown.
+- Inactive worktrees are still shown.
+- Sessions from repo root (outside `.worktrees`) are grouped under `(main repo)`.
 
-**What it creates:**
-```
-~/.config/cb/
-└── prompts/
-    ├── research.md
-    ├── plan.md
-    ├── implement.md
-    └── verify.md
-```
+### `cb list`
 
-**Notes:**
-- Safe to run multiple times (won't overwrite existing files)
-- Run after installation to set up templates
-
----
-
-### cb version
-
-Print the ClawdBay version.
+Print project/worktree/session tree output with rolled-up status.
 
 ```bash
-cb version
-# ClawdBay v0.1.0
+cb list
 ```
 
----
+### `cb archive`
 
-## Prompt Templates
+Archive workflow by killing session and removing worktree.
 
-### Default Templates
+```bash
+cb archive
+cb archive <session-name>
+```
 
-| Template | Purpose |
-|----------|---------|
-| `research.md` | Explore codebase, understand existing patterns |
-| `plan.md` | Create detailed implementation plan |
-| `implement.md` | Execute plan task by task with TDD |
-| `verify.md` | Run verification checklist before completion |
+### `cb clist`
 
-### Creating Custom Templates
+List windows and detected agents across tmux sessions.
 
-1. Create or edit files in `~/.config/cb/prompts/`
-2. Use `.md` extension
-3. Templates are plain markdown—no variable substitution
+```bash
+cb clist
+```
 
-### Per-Project Templates
+`clist` intentionally does **not** use project configuration scope.
 
-For project-specific prompts:
-1. Create `.prompts/` directory in your worktree
-2. Use `cb prompt add <template>` to copy and customize
-3. Reference with `cb claude --prompt <file>`
+## Config File
 
----
+Path: `~/.config/cb/config.toml`
+
+```toml
+version = 1
+
+[[projects]]
+path = "/Users/you/code/repo-a"
+name = "repo-a"
+```
+
+Rules:
+- `version` must be `1`.
+- `projects` may be empty.
+- Paths are canonicalized and deduplicated by canonical path.
+- Writes are atomic and persisted with `0600` mode.
 
 ## Troubleshooting
 
-### "not in a git repository"
+### `cb dash` / `cb list` shows no projects
 
-`cb start` must be run from within a git repository.
-
-```bash
-cd /path/to/your/repo
-cb start my-feature
-```
-
-### "no cb: session found"
-
-`cb claude` requires an active `cb:` tmux session. Either:
-- Run from within a tmux session started by `cb start`
-- Or run `cb start` first to create a workflow
-
-### "tmux not running"
-
-Start tmux first, or let `cb start` create a session:
+Configure at least one project:
 
 ```bash
-cb start my-feature   # Creates and attaches to session
+cb project add /absolute/path/to/repo
 ```
 
-### Dashboard shows no workflows
+### Started a session but it does not appear in `dash`/`list`
 
-No `cb:` prefixed tmux sessions exist. Start a workflow:
+The repo is likely not configured. Verify with:
 
 ```bash
-cb start my-feature
+cb project list
 ```
 
-### Templates not found
-
-Run `cb init` to install default templates:
+Then add it:
 
 ```bash
-cb init
+cb project add /absolute/path/to/repo
 ```
+
+### `project list` shows `INVALID`
+
+Configured path no longer canonicalizes (moved/deleted/symlink target missing). Fix by removing and re-adding the project path.
