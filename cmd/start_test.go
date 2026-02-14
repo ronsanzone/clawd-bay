@@ -50,7 +50,9 @@ func TestEnsureGitignoreEntry(t *testing.T) {
 
 	t.Run("appends to existing gitignore", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0644)
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0644); err != nil {
+			t.Fatalf("failed to seed .gitignore: %v", err)
+		}
 
 		ensureGitignoreEntry(dir, ".worktrees/")
 
@@ -66,7 +68,9 @@ func TestEnsureGitignoreEntry(t *testing.T) {
 
 	t.Run("does not duplicate existing entry", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".worktrees/\n"), 0644)
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".worktrees/\n"), 0644); err != nil {
+			t.Fatalf("failed to seed .gitignore: %v", err)
+		}
 
 		ensureGitignoreEntry(dir, ".worktrees/")
 
@@ -81,7 +85,9 @@ func TestEnsureGitignoreEntry(t *testing.T) {
 
 	t.Run("adds newline before entry if file lacks trailing newline", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/"), 0644)
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/"), 0644); err != nil {
+			t.Fatalf("failed to seed .gitignore: %v", err)
+		}
 
 		ensureGitignoreEntry(dir, ".worktrees/")
 
