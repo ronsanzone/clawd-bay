@@ -15,6 +15,13 @@ func (m Model) frameWidth() int {
 	return min(m.Width, maxPanelWidth)
 }
 
+func (m Model) modeLabel() DashboardMode {
+	if m.Mode == DashboardModeAgents {
+		return DashboardModeAgents
+	}
+	return DashboardModeWorktree
+}
+
 // View implements tea.Model.
 func (m Model) View() string {
 	if m.Quitting {
@@ -48,6 +55,9 @@ func (m Model) renderTree(width int) string {
 		if m.FilterMode {
 			return "No matches.\n  Press esc to clear filter."
 		}
+		if m.Mode == DashboardModeAgents {
+			return "No detected agent windows.\n  Start an agent in any tmux window."
+		}
 		return "No active sessions.\n  Start one with: cb start <branch-name>"
 	}
 
@@ -55,7 +65,7 @@ func (m Model) renderTree(width int) string {
 	treeHeight := m.treeHeight()
 
 	cursorLine := m.cursorForView()
-	if !m.FilterMode {
+	if !m.FilterMode && m.Mode != DashboardModeAgents {
 		cursorLine = CursorToLine(nodes, cursorLine)
 	}
 	start, end, _ := VisibleRange(len(lines), treeHeight, cursorLine, m.ScrollOffset)
@@ -81,7 +91,7 @@ func (m Model) buildDisplayLines(nodes []TreeNode) []string {
 
 	for i, node := range nodes {
 		// Insert blank separator before each repo (except first) in normal tree mode.
-		if !m.FilterMode && node.Type == NodeRepo && i > 0 {
+		if m.Mode != DashboardModeAgents && !m.FilterMode && node.Type == NodeRepo && i > 0 {
 			lines = append(lines, "")
 		}
 
@@ -134,6 +144,19 @@ func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
 			line = cursor + "      " + badge + " " + m.Styles.Window.Render(window.Name)
 		}
 
+	case NodeAgentWindow:
+		row := m.AgentRows[node.AgentIndex]
+		target := fmt.Sprintf("%s:%d", row.SessionName, row.WindowIndex)
+		repo := row.RepoName
+		if repo == "" {
+			repo = "Unknown"
+		}
+		tag := m.renderAgentTag(row.AgentType)
+		badge := m.renderStatusBadge(row.Status)
+		line = cursor + badge + " " + tag + " " + m.Styles.Window.Render(row.WindowName) +
+			"  " + m.Styles.Session.Render(target) +
+			"  " + m.Styles.StatusBar.Render("repo="+repo)
+
 	default:
 		line = cursor + "Unknown"
 	}
@@ -158,20 +181,6 @@ func (m Model) renderAgentTag(agentType tmux.AgentType) string {
 	}
 }
 
-// rightAlign aligns the right string to the right edge.
-func (m Model) rightAlign(left, right string) string {
-	if right == "" {
-		return left
-	}
-
-	available := m.frameWidth() - 4
-	leftWidth := lipgloss.Width(left)
-	rightWidth := lipgloss.Width(right)
-	gap := max(available-leftWidth-rightWidth, 1)
-
-	return left + strings.Repeat(" ", gap) + right
-}
-
 // renderStatusBadge renders a colored status badge.
 // Badge symbols show activity level: • (working) > ◐ (waiting) > ◦ (idle) > · (done)
 func (m Model) renderStatusBadge(status tmux.Status) string {
@@ -192,7 +201,13 @@ func (m Model) renderStatusBar() string {
 	total, working, waiting, idle := m.SessionCounts()
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d sessions", total))
+	if m.modeLabel() == DashboardModeAgents {
+		parts = append(parts, fmt.Sprintf("mode: %s", DashboardModeAgents))
+		parts = append(parts, fmt.Sprintf("%d agent windows", total))
+	} else {
+		parts = append(parts, fmt.Sprintf("mode: %s", DashboardModeWorktree))
+		parts = append(parts, fmt.Sprintf("%d sessions", total))
+	}
 
 	if working > 0 {
 		parts = append(parts, m.Styles.StatusWorking.Render(fmt.Sprintf("%d working", working)))
@@ -215,21 +230,25 @@ func (m Model) renderStatusBar() string {
 // renderFooter renders context-sensitive keybindings.
 func (m Model) renderFooter() string {
 	if m.FilterMode {
-		return fmt.Sprintf("filter: %q  ·  type to search  ·  j/k navigate  ·  enter select  ·  esc clear", m.FilterQuery)
+		return fmt.Sprintf("filter: %q  ·  type to search  ·  j/k navigate  ·  enter select  ·  esc clear  ·  m mode", m.FilterQuery)
 	}
 
 	if m.Cursor >= len(m.Nodes) {
-		return "/ filter  ·  j/k navigate  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  m mode  ·  q quit"
+	}
+
+	if m.Mode == DashboardModeAgents {
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  m mode  ·  r refresh  ·  q quit"
 	}
 
 	node := m.Nodes[m.Cursor]
 	switch node.Type {
 	case NodeRepo:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q quit"
 	case NodeSession:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q quit"
 	case NodeWindow:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q quit"
 	default:
 		return "/ filter  ·  j/k navigate  ·  q quit"
 	}
@@ -246,7 +265,7 @@ func (m Model) renderFrame(tree, statusBar, footer string) string {
 	bStyle := lipgloss.NewStyle().Foreground(m.Styles.Frame.GetBorderTopForeground())
 
 	// Top border with title: ╭─ ClawdBay ─────────────────╮
-	title := m.Styles.Title.Render(" ClawdBay ")
+	title := m.Styles.Title.Render(fmt.Sprintf(" ClawdBay · %s ", m.modeLabel()))
 	titleW := lipgloss.Width(title)
 	topLine := bStyle.Render(border.TopLeft+border.Top) +
 		title +

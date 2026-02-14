@@ -20,6 +20,15 @@ type Window struct {
 	Active bool
 }
 
+// SessionWindowInfo combines session, window, repo, and detected agent metadata.
+type SessionWindowInfo struct {
+	SessionName string
+	RepoName    string
+	Window      Window
+	AgentInfo   AgentInfo
+	Managed     bool
+}
+
 // AgentType identifies which coding agent process is active in a pane.
 type AgentType string
 
@@ -137,6 +146,35 @@ func (c *Client) ListWindows(session string) ([]Window, error) {
 		return nil, fmt.Errorf("failed to list windows for %s: %w", session, err)
 	}
 	return ParseWindowList(string(output)), nil
+}
+
+// ListSessionWindowInfo returns all windows across all tmux sessions with agent detection metadata.
+func (c *Client) ListSessionWindowInfo() ([]SessionWindowInfo, error) {
+	sessions, err := c.ListAllSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]SessionWindowInfo, 0)
+	for _, s := range sessions {
+		repoName := c.GetRepoName(s.Name)
+		wins, winErr := c.ListWindows(s.Name)
+		if winErr != nil {
+			continue
+		}
+
+		managed := strings.HasPrefix(s.Name, "cb_")
+		for _, w := range wins {
+			rows = append(rows, SessionWindowInfo{
+				SessionName: s.Name,
+				RepoName:    repoName,
+				Window:      w,
+				AgentInfo:   c.DetectAgentInfo(s.Name, w.Name),
+				Managed:     managed,
+			})
+		}
+	}
+	return rows, nil
 }
 
 // ParseSessionList parses tmux list-sessions output and returns only cb_ prefixed sessions.

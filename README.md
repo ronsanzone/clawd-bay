@@ -17,6 +17,7 @@ cb init
 cb start my-feature
 cb claude --name research
 cb dash
+cb dash --mode agents
 ```
 
 ## Core Workflow
@@ -37,7 +38,8 @@ cb dash
 |---------|-------------|---------|
 | `cb start <branch>` | Create worktree + tmux session | `cb start feat-auth` |
 | `cb claude` | Add Claude session to current worktree | `cb claude --name research` |
-| `cb dash` | Interactive dashboard (default) | `cb` |
+| `cb dash` | Interactive dashboard (worktree mode by default) | `cb` |
+| `cb dash --mode agents` | Dashboard listing detected agent windows across tmux sessions | `cb dash --mode agents` |
 | `cb list` | List active workflows | `cb list` |
 | `cb archive` | Clean up workflow (keeps branch) | `cb archive` |
 | `cb prompt list` | Show available templates | `cb prompt list` |

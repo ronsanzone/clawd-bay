@@ -22,14 +22,11 @@ func (l listClaudesOut) toString() string {
 		repoName = repoName + " (wt)"
 	}
 
-	var agentStatus = ""
 	if l.isAgent {
-		agentStatus = "agentType: " + string(l.agentType) + " status: " + string(l.agentStatus)
-	} else {
-		agentStatus = "DETECTED AGENT: NONE"
+		agentStatus := "agentType: " + string(l.agentType) + " status: " + string(l.agentStatus)
+		return fmt.Sprintf("%s %s (%s)\n", l.windowName, repoName, agentStatus)
 	}
-
-	return fmt.Sprintf("%s %s (%s)\n", l.windowName, repoName, agentStatus)
+	return fmt.Sprintf("%s %s (DETECTED AGENT: NONE)\n", l.windowName, repoName)
 }
 
 var listClaudesCmd = &cobra.Command{
@@ -37,46 +34,26 @@ var listClaudesCmd = &cobra.Command{
 	Short: "List all active Claude Code sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tmuxClient := tmux.NewClient()
-		sessions, err := tmuxClient.ListAllSessions()
+		rows, err := tmuxClient.ListSessionWindowInfo()
 		if err != nil {
 			return err
 		}
 
-		if len(sessions) == 0 {
+		if len(rows) == 0 {
 			fmt.Println("No active sessions. Start one with: cb start <branch-name>")
 			return nil
 		}
 
-		var output []listClaudesOut // Group by repo
-		repoSessions := make(map[string][]tmux.Session)
-		var repoOrder []string
-
-		for _, s := range sessions {
-			repoName := tmuxClient.GetRepoName(s.Name)
-			if _, exists := repoSessions[repoName]; !exists {
-				repoOrder = append(repoOrder, repoName)
-			}
-			repoSessions[repoName] = append(repoSessions[repoName], s)
-		}
-
-		for _, repoName := range repoOrder {
-			for _, s := range repoSessions[repoName] {
-				wins, winErr := tmuxClient.ListWindows(s.Name)
-				if winErr == nil {
-					for _, w := range wins {
-						out := listClaudesOut{
-							repoName:   repoName,
-							isWorktree: false,
-							windowName: w.Name,
-						}
-						info := tmuxClient.DetectAgentInfo(s.Name, w.Name)
-						out.agentType = info.Type
-						out.isAgent = info.Detected
-						out.agentStatus = info.Status
-						output = append(output, out)
-					}
-				}
-			}
+		var output []listClaudesOut
+		for _, row := range rows {
+			output = append(output, listClaudesOut{
+				repoName:    row.RepoName,
+				isWorktree:  row.Managed,
+				windowName:  row.Window.Name,
+				agentType:   row.AgentInfo.Type,
+				isAgent:     row.AgentInfo.Detected,
+				agentStatus: row.AgentInfo.Status,
+			})
 		}
 
 		for _, o := range output {

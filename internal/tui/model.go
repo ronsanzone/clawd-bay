@@ -18,6 +18,7 @@ type tickMsg time.Time
 // refreshMsg carries new data from a refresh.
 type refreshMsg struct {
 	Groups         []RepoGroup
+	AgentRows      []AgentWindowRow
 	WindowStatuses map[string]tmux.Status
 	WindowAgents   map[string]tmux.AgentType
 }
@@ -37,7 +38,31 @@ const (
 	NodeSession
 	// NodeWindow is a tmux window node.
 	NodeWindow
+	// NodeAgentWindow is a flat agent window row in agents mode.
+	NodeAgentWindow
 )
+
+// DashboardMode controls which dashboard representation is shown.
+type DashboardMode string
+
+const (
+	DashboardModeWorktree DashboardMode = "worktree"
+	DashboardModeAgents   DashboardMode = "agents"
+)
+
+// ParseDashboardMode parses a user-supplied mode string.
+func ParseDashboardMode(raw string) (DashboardMode, error) {
+	mode := DashboardMode(strings.ToLower(strings.TrimSpace(raw)))
+	if mode == "" {
+		return DashboardModeWorktree, nil
+	}
+	switch mode {
+	case DashboardModeWorktree, DashboardModeAgents:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid dashboard mode %q (valid: %s, %s)", raw, DashboardModeWorktree, DashboardModeAgents)
+	}
+}
 
 // RepoGroup represents a repository with its worktree sessions.
 type RepoGroup struct {
@@ -61,11 +86,25 @@ type TreeNode struct {
 	RepoIndex    int
 	SessionIndex int
 	WindowIndex  int
+	AgentIndex   int
+}
+
+// AgentWindowRow represents one detected coding-agent window across all tmux sessions.
+type AgentWindowRow struct {
+	SessionName string
+	WindowName  string
+	WindowIndex int
+	RepoName    string
+	AgentType   tmux.AgentType
+	Status      tmux.Status
+	Managed     bool
 }
 
 // Model is the Bubbletea model for the dashboard.
 type Model struct {
+	Mode                DashboardMode
 	Groups              []RepoGroup
+	AgentRows           []AgentWindowRow
 	Cursor              int
 	Nodes               []TreeNode
 	FilterMode          bool
@@ -112,6 +151,21 @@ func RollupStatus(statuses []tmux.Status) tmux.Status {
 
 // SessionCounts returns total sessions and counts by status.
 func (m Model) SessionCounts() (total, working, waiting, idle int) {
+	if m.Mode == DashboardModeAgents {
+		for _, row := range m.AgentRows {
+			total++
+			switch row.Status {
+			case tmux.StatusWorking:
+				working++
+			case tmux.StatusWaiting:
+				waiting++
+			case tmux.StatusIdle:
+				idle++
+			}
+		}
+		return
+	}
+
 	for _, g := range m.Groups {
 		for _, s := range g.Sessions {
 			total++
@@ -205,6 +259,15 @@ func BuildNodes(groups []RepoGroup) []TreeNode {
 	return nodes
 }
 
+// BuildAgentNodes flattens agent rows into a list of navigable nodes.
+func BuildAgentNodes(rows []AgentWindowRow) []TreeNode {
+	nodes := make([]TreeNode, 0, len(rows))
+	for i := range rows {
+		nodes = append(nodes, TreeNode{Type: NodeAgentWindow, AgentIndex: i})
+	}
+	return nodes
+}
+
 // VisibleRange calculates which lines to display given viewport constraints.
 // Returns start (inclusive), end (exclusive), and new scroll offset.
 func VisibleRange(lineCount, viewHeight, cursorLine, scrollOffset int) (start, end, newOffset int) {
@@ -241,8 +304,15 @@ func CursorToLine(nodes []TreeNode, cursor int) int {
 
 // InitialModel creates the initial dashboard model.
 func InitialModel(tmuxClient *tmux.Client) Model {
+	return InitialModelWithMode(tmuxClient, DashboardModeWorktree)
+}
+
+// InitialModelWithMode creates the initial dashboard model with an explicit mode.
+func InitialModelWithMode(tmuxClient *tmux.Client, mode DashboardMode) Model {
 	return Model{
+		Mode:                mode,
 		Groups:              []RepoGroup{},
+		AgentRows:           []AgentWindowRow{},
 		TmuxClient:          tmuxClient,
 		WindowStatuses:      make(map[string]tmux.Status),
 		WindowAgentTypes:    make(map[string]tmux.AgentType),
@@ -264,25 +334,44 @@ func (m Model) tickCmd() tea.Cmd {
 
 func (m Model) refreshCmd() tea.Cmd {
 	return func() tea.Msg {
-		groups, statuses, agents := fetchGroups(m.TmuxClient)
-		return refreshMsg{Groups: groups, WindowStatuses: statuses, WindowAgents: agents}
+		groups, rows, statuses, agents := fetchDashboardData(m.TmuxClient, m.Mode)
+		return refreshMsg{
+			Groups:         groups,
+			AgentRows:      rows,
+			WindowStatuses: statuses,
+			WindowAgents:   agents,
+		}
 	}
 }
 
-// fetchGroups queries tmux for all data.
-func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status, map[string]tmux.AgentType) {
-	slog.Debug("fetchGroups called")
+// fetchDashboardData queries tmux for all data needed by the selected mode.
+func fetchDashboardData(
+	tmuxClient *tmux.Client,
+	mode DashboardMode,
+) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
+	switch mode {
+	case DashboardModeAgents:
+		return fetchAgentRowsData(tmuxClient)
+	default:
+		return fetchWorktreeData(tmuxClient)
+	}
+}
+
+func fetchWorktreeData(
+	tmuxClient *tmux.Client,
+) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
+	slog.Debug("fetchWorktreeData called")
 	if tmuxClient == nil {
-		slog.Debug("fetchGroups: tmuxClient is nil")
-		return nil, nil, nil
+		slog.Debug("fetchWorktreeData: tmuxClient is nil")
+		return nil, nil, nil, nil
 	}
 
 	sessions, err := tmuxClient.ListSessions()
 	if err != nil {
-		slog.Debug("fetchGroups: ListSessions failed", "err", err)
-		return nil, nil, nil
+		slog.Debug("fetchWorktreeData: ListSessions failed", "err", err)
+		return nil, nil, nil, nil
 	}
-	slog.Debug("fetchGroups: found sessions", "count", len(sessions))
+	slog.Debug("fetchWorktreeData: found sessions", "count", len(sessions))
 
 	repoNames := make(map[string]string)
 	windowMap := make(map[string][]tmux.Window)
@@ -308,7 +397,50 @@ func fetchGroups(tmuxClient *tmux.Client) ([]RepoGroup, map[string]tmux.Status, 
 		}
 	}
 
-	return GroupByRepo(sessions, repoNames, windowMap, statusMap), statusMap, agentMap
+	return GroupByRepo(sessions, repoNames, windowMap, statusMap), nil, statusMap, agentMap
+}
+
+func fetchAgentRowsData(
+	tmuxClient *tmux.Client,
+) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
+	slog.Debug("fetchAgentRowsData called")
+	if tmuxClient == nil {
+		slog.Debug("fetchAgentRowsData: tmuxClient is nil")
+		return nil, nil, nil, nil
+	}
+
+	infos, err := tmuxClient.ListSessionWindowInfo()
+	if err != nil {
+		slog.Debug("fetchAgentRowsData: ListSessionWindowInfo failed", "err", err)
+		return nil, nil, nil, nil
+	}
+
+	rows := make([]AgentWindowRow, 0, len(infos))
+	statusMap := make(map[string]tmux.Status)
+	agentMap := make(map[string]tmux.AgentType)
+
+	for _, info := range infos {
+		if !info.AgentInfo.Detected {
+			continue
+		}
+
+		row := AgentWindowRow{
+			SessionName: info.SessionName,
+			WindowName:  info.Window.Name,
+			WindowIndex: info.Window.Index,
+			RepoName:    info.RepoName,
+			AgentType:   info.AgentInfo.Type,
+			Status:      info.AgentInfo.Status,
+			Managed:     info.Managed,
+		}
+		rows = append(rows, row)
+
+		key := row.SessionName + ":" + row.WindowName
+		statusMap[key] = row.Status
+		agentMap[key] = row.AgentType
+	}
+
+	return nil, rows, statusMap, agentMap
 }
 
 // adjustScroll updates ScrollOffset to keep cursor visible in the viewport.
@@ -345,6 +477,10 @@ func (m Model) treeHeight() int {
 
 // totalDisplayLines returns the total number of display lines including blank separators.
 func (m Model) totalDisplayLines() int {
+	if m.Mode == DashboardModeAgents {
+		return len(m.Nodes)
+	}
+
 	count := len(m.Nodes)
 	for i, node := range m.Nodes {
 		if node.Type == NodeRepo && i > 0 {
@@ -388,6 +524,15 @@ func (m Model) filterSearchText(node TreeNode) string {
 		session := group.Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
 		return window.Name + " " + session.Name + " " + group.Name
+	case NodeAgentWindow:
+		row := m.AgentRows[node.AgentIndex]
+		return strings.Join([]string{
+			row.WindowName,
+			row.SessionName,
+			row.RepoName,
+			string(row.AgentType),
+			string(row.Status),
+		}, " ")
 	default:
 		return ""
 	}
@@ -411,10 +556,16 @@ func (m Model) cursorForView() int {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case refreshMsg:
-		m.Groups = mergeExpandState(m.Groups, msg.Groups)
+		if m.Mode == DashboardModeAgents {
+			m.AgentRows = msg.AgentRows
+			m.Nodes = BuildAgentNodes(m.AgentRows)
+			m.Groups = nil
+		} else {
+			m.Groups = mergeExpandState(m.Groups, msg.Groups)
+			m.Nodes = BuildNodes(m.Groups)
+		}
 		m.WindowStatuses = msg.WindowStatuses
 		m.WindowAgentTypes = msg.WindowAgents
-		m.Nodes = BuildNodes(m.Groups)
 		if m.FilterMode {
 			m.updateFilteredNodes()
 		}
@@ -487,6 +638,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.Quitting = true
 			return m, tea.Quit
+		case "m":
+			m.toggleMode()
+			return m, m.refreshCmd()
 		case "up", "k":
 			if m.Cursor > 0 {
 				m.Cursor--
@@ -500,10 +654,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.handleEnter()
 		case "l", "right":
+			if m.Mode == DashboardModeAgents {
+				return m, nil
+			}
 			return m.handleExpand()
 		case "h", "left":
+			if m.Mode == DashboardModeAgents {
+				return m, nil
+			}
 			return m.handleCollapse()
 		case "c":
+			if m.Mode == DashboardModeAgents {
+				return m, nil
+			}
 			return m.handleAddClaude()
 		case "r":
 			return m, m.refreshCmd()
@@ -516,6 +679,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) toggleMode() {
+	if m.Mode == DashboardModeAgents {
+		m.Mode = DashboardModeWorktree
+	} else {
+		m.Mode = DashboardModeAgents
+	}
+
+	m.Cursor = 0
+	m.Nodes = nil
+	m.Groups = nil
+	m.AgentRows = nil
+	m.ScrollOffset = 0
+
+	m.FilterMode = false
+	m.FilterQuery = ""
+	m.FilteredNodes = nil
+	m.FilteredCursor = 0
 }
 
 // mergeExpandState preserves expand/collapse state across refreshes.
@@ -570,6 +752,12 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		m.SelectedName = session.Name
 		m.SelectedWindow = window.Name
 		m.SelectedWindowIndex = window.Index
+		return m, tea.Quit
+	case NodeAgentWindow:
+		row := m.AgentRows[node.AgentIndex]
+		m.SelectedName = row.SessionName
+		m.SelectedWindow = row.WindowName
+		m.SelectedWindowIndex = row.WindowIndex
 		return m, tea.Quit
 	}
 	return m, nil

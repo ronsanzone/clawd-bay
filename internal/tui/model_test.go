@@ -699,3 +699,153 @@ func TestUpdateRefreshMsgSetsWindowAgentTypes(t *testing.T) {
 		t.Fatalf("WindowStatuses[cb_demo:custom-window] = %q, want %q", got, tmux.StatusWorking)
 	}
 }
+
+func TestBuildAgentNodes(t *testing.T) {
+	rows := []AgentWindowRow{
+		{SessionName: "cb_demo", WindowName: "claude", WindowIndex: 1},
+		{SessionName: "other", WindowName: "codex", WindowIndex: 3},
+	}
+
+	nodes := BuildAgentNodes(rows)
+	if len(nodes) != 2 {
+		t.Fatalf("len(nodes) = %d, want %d", len(nodes), 2)
+	}
+	if nodes[0].Type != NodeAgentWindow || nodes[0].AgentIndex != 0 {
+		t.Fatalf("node[0] = %+v, want NodeAgentWindow index 0", nodes[0])
+	}
+	if nodes[1].Type != NodeAgentWindow || nodes[1].AgentIndex != 1 {
+		t.Fatalf("node[1] = %+v, want NodeAgentWindow index 1", nodes[1])
+	}
+}
+
+func TestAgentsModeFilterAndEnterSelectsWindowByIndex(t *testing.T) {
+	m := Model{
+		Mode: DashboardModeAgents,
+		AgentRows: []AgentWindowRow{
+			{
+				SessionName: "cb_demo",
+				WindowName:  "codex-main",
+				WindowIndex: 9,
+				RepoName:    "my-repo",
+				AgentType:   tmux.AgentCodex,
+				Status:      tmux.StatusWaiting,
+				Managed:     true,
+			},
+			{
+				SessionName: "other",
+				WindowName:  "claude-main",
+				WindowIndex: 2,
+				RepoName:    "other-repo",
+				AgentType:   tmux.AgentClaude,
+				Status:      tmux.StatusWorking,
+				Managed:     false,
+			},
+		},
+		Styles:              NewStyles(KanagawaClaw),
+		WindowStatuses:      make(map[string]tmux.Status),
+		WindowAgentTypes:    make(map[string]tmux.AgentType),
+		Width:               80,
+		Height:              24,
+		SelectedWindowIndex: -1,
+	}
+	m.Nodes = BuildAgentNodes(m.AgentRows)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("my-repo codex waiting")})
+	m = updated.(Model)
+
+	if len(m.FilteredNodes) != 1 {
+		t.Fatalf("FilteredNodes len = %d, want %d", len(m.FilteredNodes), 1)
+	}
+
+	updatedModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := updatedModel.(Model)
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd from enter on filtered agent row")
+	}
+	if result.SelectedName != "cb_demo" {
+		t.Fatalf("SelectedName = %q, want %q", result.SelectedName, "cb_demo")
+	}
+	if result.SelectedWindowIndex != 9 {
+		t.Fatalf("SelectedWindowIndex = %d, want %d", result.SelectedWindowIndex, 9)
+	}
+}
+
+func TestToggleModeResetsFilterAndCursor(t *testing.T) {
+	m := Model{
+		Mode:           DashboardModeWorktree,
+		Groups:         []RepoGroup{{Name: "repo", Expanded: true}},
+		Nodes:          []TreeNode{{Type: NodeRepo, RepoIndex: 0}},
+		Cursor:         3,
+		FilterMode:     false,
+		FilterQuery:    "abc",
+		FilteredNodes:  []TreeNode{{Type: NodeRepo, RepoIndex: 0}},
+		FilteredCursor: 1,
+		ScrollOffset:   8,
+		Styles:         NewStyles(KanagawaClaw),
+		Width:          80,
+		Height:         24,
+	}
+
+	updatedModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated := updatedModel.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected refresh cmd when toggling mode")
+	}
+	if updated.Mode != DashboardModeAgents {
+		t.Fatalf("Mode = %q, want %q", updated.Mode, DashboardModeAgents)
+	}
+	if updated.FilterMode {
+		t.Fatal("FilterMode should be false after mode toggle")
+	}
+	if updated.FilterQuery != "" {
+		t.Fatalf("FilterQuery = %q, want empty", updated.FilterQuery)
+	}
+	if updated.Cursor != 0 {
+		t.Fatalf("Cursor = %d, want 0", updated.Cursor)
+	}
+	if updated.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", updated.ScrollOffset)
+	}
+}
+
+func TestAgentsModeIgnoresTreeAndCreateKeys(t *testing.T) {
+	m := Model{
+		Mode: DashboardModeAgents,
+		AgentRows: []AgentWindowRow{
+			{
+				SessionName: "cb_demo",
+				WindowName:  "codex-main",
+				WindowIndex: 1,
+				RepoName:    "repo",
+				AgentType:   tmux.AgentCodex,
+				Status:      tmux.StatusWorking,
+			},
+		},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildAgentNodes(m.AgentRows)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected nil cmd for expand in agents mode")
+	}
+	if len(m.Nodes) != 1 || m.Nodes[0].Type != NodeAgentWindow {
+		t.Fatalf("nodes changed unexpectedly: %+v", m.Nodes)
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected nil cmd for add-claude in agents mode")
+	}
+	if m.StatusMsg != "" {
+		t.Fatalf("StatusMsg should remain empty, got %q", m.StatusMsg)
+	}
+}

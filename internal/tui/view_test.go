@@ -248,3 +248,85 @@ func TestRenderNodeLineWindowNoAgentTagForNone(t *testing.T) {
 		t.Fatalf("window line missing status badge for done: %q", line)
 	}
 }
+
+func TestViewAgentsModeEmptyState(t *testing.T) {
+	m := Model{
+		Mode:           DashboardModeAgents,
+		AgentRows:      []AgentWindowRow{},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildAgentNodes(m.AgentRows)
+
+	view := m.View()
+	if !strings.Contains(view, "No detected agent windows") {
+		t.Fatalf("agents empty view missing message: %q", view)
+	}
+}
+
+func TestRenderNodeLineAgentRowIncludesMetadata(t *testing.T) {
+	m := Model{
+		Mode: DashboardModeAgents,
+		AgentRows: []AgentWindowRow{
+			{
+				SessionName: "cb_demo",
+				WindowName:  "workbench",
+				WindowIndex: 4,
+				RepoName:    "demo-repo",
+				AgentType:   tmux.AgentCodex,
+				Status:      tmux.StatusWorking,
+			},
+		},
+		Styles: NewStyles(KanagawaClaw),
+		Width:  80,
+		Cursor: 0,
+	}
+	m.Nodes = BuildAgentNodes(m.AgentRows)
+
+	line := m.renderNodeLine(m.Nodes[0], 0)
+	if !strings.Contains(line, "[CODEX]") {
+		t.Fatalf("agent row missing [CODEX] tag: %q", line)
+	}
+	if !strings.Contains(line, "•") {
+		t.Fatalf("agent row missing status badge: %q", line)
+	}
+	if !strings.Contains(line, "cb_demo:4") {
+		t.Fatalf("agent row missing session target: %q", line)
+	}
+	if !strings.Contains(line, "repo=demo-repo") {
+		t.Fatalf("agent row missing repo metadata: %q", line)
+	}
+	if strings.Contains(line, "managed") || strings.Contains(line, "unmanaged") {
+		t.Fatalf("agent row should not include managed label: %q", line)
+	}
+}
+
+func TestRenderFooterAgentsMode(t *testing.T) {
+	m := Model{
+		Mode: DashboardModeAgents,
+		AgentRows: []AgentWindowRow{
+			{
+				SessionName: "cb_demo",
+				WindowName:  "claude",
+				WindowIndex: 1,
+				RepoName:    "repo",
+				AgentType:   tmux.AgentClaude,
+				Status:      tmux.StatusIdle,
+			},
+		},
+		Styles: NewStyles(KanagawaClaw),
+		Width:  80,
+		Height: 24,
+	}
+	m.Nodes = BuildAgentNodes(m.AgentRows)
+
+	footer := m.renderFooter()
+	if !strings.Contains(footer, "m mode") {
+		t.Fatalf("agents footer missing mode toggle: %q", footer)
+	}
+	if strings.Contains(footer, "c claude") {
+		t.Fatalf("agents footer should not contain create key: %q", footer)
+	}
+}

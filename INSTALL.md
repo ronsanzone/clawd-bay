@@ -123,14 +123,18 @@ Open the interactive TUI dashboard.
 
 ```
 Usage: cb dash
+       cb dash --mode worktree
+       cb dash --mode agents
        cb        # Alias - runs dash by default
 ```
 
 **Dashboard features:**
-- Shows all `cb:` sessions grouped by worktree
-- Displays Claude session status (IDLE, WORKING, DONE)
+- `worktree` mode: shows all `cb_` sessions grouped by repository/worktree
+- `agents` mode: shows detected agent windows across all tmux sessions
+- Displays session/agent status (DONE, IDLE, WAITING, WORKING)
 - Navigate with arrow keys or j/k
 - Press Enter to attach to selected session
+- Press `m` to toggle modes
 - Press q to quit
 
 **Keybindings:**
@@ -139,6 +143,7 @@ Usage: cb dash
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `Enter` | Attach to session |
+| `m` | Toggle between `worktree` and `agents` mode |
 | `q` | Quit dashboard |
 
 ---

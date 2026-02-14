@@ -60,6 +60,88 @@ func TestClient_ListSessions_NoTmux(t *testing.T) {
 	}
 }
 
+func TestClient_ListSessionWindowInfo(t *testing.T) {
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			if name == "tmux" && len(args) > 0 {
+				switch args[0] {
+				case "list-sessions":
+					return []byte("cb_demo: 1 windows (created now)\nteam-sync: 1 windows (created now)\n"), nil
+				case "display-message":
+					target := args[2]
+					format := args[4]
+					if format == "#{pane_current_path}" {
+						if target == "cb_demo:0" {
+							return []byte("/tmp/repo-a/.worktrees/repo-a-feat"), nil
+						}
+						return []byte("/tmp/repo-b"), nil
+					}
+					if format == "#{pane_current_command}" {
+						if target == "cb_demo:workbench" {
+							return []byte("codex"), nil
+						}
+						return []byte("zsh"), nil
+					}
+					if format == "#{pane_tty}" {
+						return []byte("/dev/ttys001"), nil
+					}
+				case "list-windows":
+					session := args[2]
+					if session == "cb_demo" {
+						return []byte("1:workbench:1\n"), nil
+					}
+					return []byte("0:shell:1\n"), nil
+				case "capture-pane":
+					return []byte("ctrl+c to interrupt\n"), nil
+				}
+			}
+
+			if name == "git" {
+				cwd := args[1]
+				if cwd == "/tmp/repo-a/.worktrees/repo-a-feat" {
+					return []byte("/tmp/repo-a\n"), nil
+				}
+				return []byte("/tmp/repo-b\n"), nil
+			}
+
+			if name == "ps" {
+				return []byte("123 ttys001 codex\n"), nil
+			}
+
+			return nil, errors.New("unexpected command")
+		},
+	}
+
+	rows, err := client.ListSessionWindowInfo()
+	if err != nil {
+		t.Fatalf("ListSessionWindowInfo() error = %v", err)
+	}
+
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
+	}
+
+	if rows[0].SessionName != "cb_demo" {
+		t.Fatalf("rows[0].SessionName = %q, want %q", rows[0].SessionName, "cb_demo")
+	}
+	if !rows[0].Managed {
+		t.Fatal("rows[0].Managed should be true")
+	}
+	if rows[0].AgentInfo.Type != AgentCodex || !rows[0].AgentInfo.Detected {
+		t.Fatalf("rows[0].AgentInfo = %+v, want detected codex", rows[0].AgentInfo)
+	}
+
+	if rows[1].SessionName != "team-sync" {
+		t.Fatalf("rows[1].SessionName = %q, want %q", rows[1].SessionName, "team-sync")
+	}
+	if rows[1].Managed {
+		t.Fatal("rows[1].Managed should be false")
+	}
+	if rows[1].AgentInfo.Detected {
+		t.Fatalf("rows[1].AgentInfo.Detected = %v, want false", rows[1].AgentInfo.Detected)
+	}
+}
+
 type mockError struct {
 	msg string
 }

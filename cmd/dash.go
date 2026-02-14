@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var dashMode string
+
 type dashTmuxClient interface {
 	SelectWindow(session string, windowIndex int) error
 	AttachOrSwitchToSession(name string, inTmux bool) error
@@ -41,8 +43,13 @@ var dashCmd = &cobra.Command{
 	Use:   "dash",
 	Short: "Open interactive dashboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		mode, err := tui.ParseDashboardMode(dashMode)
+		if err != nil {
+			return err
+		}
+
 		tmuxClient := tmux.NewClient()
-		model := tui.InitialModel(tmuxClient)
+		model := tui.InitialModelWithMode(tmuxClient, mode)
 
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		finalModel, err := p.Run()
@@ -61,5 +68,6 @@ var dashCmd = &cobra.Command{
 }
 
 func init() {
+	dashCmd.Flags().StringVar(&dashMode, "mode", string(tui.DashboardModeWorktree), "dashboard mode: worktree or agents")
 	rootCmd.AddCommand(dashCmd)
 }
