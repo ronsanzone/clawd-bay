@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,4 +94,14 @@ func TestEnsureGitignoreEntry(t *testing.T) {
 			t.Errorf("got %q, want %q", content, want)
 		}
 	})
+}
+
+func TestRunStart_RejectsEmptySanitizedBranch(t *testing.T) {
+	err := runStart(startCmd, []string{"@#$%"})
+	if err == nil {
+		t.Fatal("expected error for empty sanitized branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid after sanitization") {
+		t.Fatalf("error = %q, want to contain %q", err.Error(), "invalid after sanitization")
+	}
 }

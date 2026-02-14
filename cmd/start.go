@@ -33,6 +33,9 @@ func init() {
 
 func runStart(cmd *cobra.Command, args []string) error {
 	branchName := sanitizeBranchName(args[0])
+	if branchName == "" {
+		return fmt.Errorf("branch name %q is invalid after sanitization; use letters, numbers, '-', '_', or '/'", args[0])
+	}
 
 	// Verify we're in a git repository
 	if _, err := exec.Command("git", "rev-parse", "--git-dir").Output(); err != nil {
