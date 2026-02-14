@@ -39,6 +39,8 @@ const (
 	AgentOpenCode AgentType = "open_code"
 )
 
+const SessionOptionHomePath = "@cb_home_path"
+
 // AgentInfo bundles the detected agent and its current status.
 type AgentInfo struct {
 	Type     AgentType
@@ -543,10 +545,34 @@ func (c *Client) SelectWindow(session string, windowIndex int) error {
 	return nil
 }
 
+// SetSessionOption sets a tmux session-scoped option value.
+func (c *Client) SetSessionOption(session, key, value string) error {
+	_, err := c.execCommand("tmux", "set-option", "-t", session, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set option %s on session %s: %w", key, session, err)
+	}
+	return nil
+}
+
+// GetSessionOption gets a tmux session-scoped option value.
+func (c *Client) GetSessionOption(session, key string) (string, error) {
+	output, err := c.execCommand("tmux", "show-options", "-t", session, "-v", key)
+	if err != nil {
+		return "", fmt.Errorf("failed to get option %s on session %s: %w", key, session, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // GetPaneWorkingDir returns the working directory of the first pane in a session.
 // Returns empty string on error.
 func (c *Client) GetPaneWorkingDir(session string) string {
-	target := session + ":0"
+	return c.GetWindowWorkingDir(session, 0)
+}
+
+// GetWindowWorkingDir returns the working directory of a specific window's pane.
+// Returns empty string on error.
+func (c *Client) GetWindowWorkingDir(session string, windowIndex int) string {
+	target := fmt.Sprintf("%s:%d", session, windowIndex)
 	output, err := c.execCommand("tmux", "display-message", "-t", target, "-p", "#{pane_current_path}")
 	if err != nil {
 		return ""

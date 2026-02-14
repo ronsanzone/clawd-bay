@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,11 +13,13 @@ import (
 )
 
 type fakeTmux struct {
-	sessions []tmux.Session
-	paths    map[string]string
-	windows  map[string][]tmux.Window
-	infos    map[string]tmux.AgentInfo
-	err      error
+	sessions   []tmux.Session
+	paths      map[string]string
+	options    map[string]string
+	optionErrs map[string]error
+	windows    map[string][]tmux.Window
+	infos      map[string]tmux.AgentInfo
+	err        error
 }
 
 func (f fakeTmux) ListSessions() ([]tmux.Session, error) {
@@ -32,6 +35,17 @@ func (f fakeTmux) ListWindows(session string) ([]tmux.Window, error) {
 
 func (f fakeTmux) GetPaneWorkingDir(session string) string {
 	return f.paths[session]
+}
+
+func (f fakeTmux) GetSessionOption(session, key string) (string, error) {
+	optionKey := session + "|" + key
+	if err, ok := f.optionErrs[optionKey]; ok {
+		return "", err
+	}
+	if value, ok := f.options[optionKey]; ok {
+		return value, nil
+	}
+	return "", errors.New("missing option")
 }
 
 func (f fakeTmux) DetectAgentInfo(session, window string) tmux.AgentInfo {
@@ -94,6 +108,10 @@ func TestDiscover_MainRepoAndLongestWorktreeMatch(t *testing.T) {
 			"cb_nested":  nestedPkg,
 			"cb_outside": filepath.Join(home, "elsewhere"),
 		},
+		options: map[string]string{
+			"cb_main|" + tmux.SessionOptionHomePath:   repo,
+			"cb_nested|" + tmux.SessionOptionHomePath: wtNested,
+		},
 		windows: map[string][]tmux.Window{
 			"cb_main":   {{Index: 0, Name: "claude"}},
 			"cb_nested": {{Index: 0, Name: "claude"}},
@@ -150,6 +168,138 @@ func TestDiscover_MainRepoAndLongestWorktreeMatch(t *testing.T) {
 	}
 	if len(nestedSessions) != 1 || nestedSessions[0].Name != "cb_nested" {
 		t.Fatalf("nested worktree match failed: %+v", nestedSessions)
+	}
+}
+
+func TestDiscover_PinnedHomePlacementIgnoresPaneDrift(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repo := filepath.Join(home, "repo")
+	wt := filepath.Join(repo, ".worktrees", "repo-feature")
+	repoScripts := filepath.Join(repo, "scripts")
+	driftDir := filepath.Join(repo, "tmp", "drift")
+	for _, p := range []string{repo, wt, repoScripts, driftDir} {
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+	}
+
+	if err := config.SaveUserConfig(config.UserConfig{
+		Version: config.SupportedConfigVersion,
+		Projects: []config.ProjectConfig{
+			{Path: repo, Name: "repo"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveUserConfig() error = %v", err)
+	}
+
+	f := fakeTmux{
+		sessions: []tmux.Session{{Name: "cb_stable"}},
+		paths: map[string]string{
+			"cb_stable": driftDir,
+		},
+		options: map[string]string{
+			"cb_stable|" + tmux.SessionOptionHomePath: wt,
+		},
+		windows: map[string][]tmux.Window{
+			"cb_stable": {{Index: 0, Name: "claude"}},
+		},
+		infos: map[string]tmux.AgentInfo{
+			"cb_stable:claude": {Type: tmux.AgentClaude, Detected: true, Status: tmux.StatusIdle},
+		},
+	}
+
+	svc := &Service{
+		tmuxClient: f,
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte(strings.Join([]string{
+				"worktree " + repo,
+				"worktree " + wt,
+			}, "\n")), nil
+		},
+	}
+
+	result, err := svc.Discover()
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(result.Projects) != 1 || len(result.Projects[0].Worktrees) != 2 {
+		t.Fatalf("unexpected discovery tree: %+v", result.Projects)
+	}
+
+	mainSessions := result.Projects[0].Worktrees[0].Sessions
+	if len(mainSessions) != 0 {
+		t.Fatalf("main repo sessions = %+v, want empty", mainSessions)
+	}
+	worktreeSessions := result.Projects[0].Worktrees[1].Sessions
+	if len(worktreeSessions) != 1 || worktreeSessions[0].Name != "cb_stable" {
+		t.Fatalf("pinned session placement mismatch: %+v", worktreeSessions)
+	}
+}
+
+func TestDiscover_UnpinnedSessionFallsBackToMainRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repo := filepath.Join(home, "repo")
+	wt := filepath.Join(repo, ".worktrees", "repo-feature")
+	repoScripts := filepath.Join(repo, "scripts")
+	wtPkg := filepath.Join(wt, "pkg")
+	for _, p := range []string{repo, wt, repoScripts, wtPkg} {
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+	}
+
+	if err := config.SaveUserConfig(config.UserConfig{
+		Version: config.SupportedConfigVersion,
+		Projects: []config.ProjectConfig{
+			{Path: repo, Name: "repo"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveUserConfig() error = %v", err)
+	}
+
+	f := fakeTmux{
+		sessions: []tmux.Session{{Name: "cb_untagged"}},
+		paths: map[string]string{
+			"cb_untagged": wtPkg,
+		},
+		windows: map[string][]tmux.Window{
+			"cb_untagged": {{Index: 0, Name: "claude"}},
+		},
+		infos: map[string]tmux.AgentInfo{
+			"cb_untagged:claude": {Type: tmux.AgentCodex, Detected: true, Status: tmux.StatusWorking},
+		},
+		optionErrs: map[string]error{
+			"cb_untagged|" + tmux.SessionOptionHomePath: errors.New("missing option"),
+		},
+	}
+
+	svc := &Service{
+		tmuxClient: f,
+		execCmd: func(name string, args ...string) ([]byte, error) {
+			return []byte(strings.Join([]string{
+				"worktree " + repo,
+				"worktree " + wt,
+			}, "\n")), nil
+		},
+	}
+
+	result, err := svc.Discover()
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(result.Projects) != 1 {
+		t.Fatalf("len(projects) = %d, want 1", len(result.Projects))
+	}
+	project := result.Projects[0]
+	if len(project.Worktrees[0].Sessions) != 1 || project.Worktrees[0].Sessions[0].Name != "cb_untagged" {
+		t.Fatalf("main repo placement mismatch: %+v", project.Worktrees[0].Sessions)
+	}
+	if len(project.Worktrees[1].Sessions) != 0 {
+		t.Fatalf("worktree sessions = %+v, want empty", project.Worktrees[1].Sessions)
 	}
 }
 

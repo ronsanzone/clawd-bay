@@ -76,7 +76,8 @@ Hierarchy:
 Scoping:
 - Only configured projects are shown.
 - Inactive worktrees are still shown.
-- Sessions from repo root (outside `.worktrees`) are grouped under `(main repo)`.
+- Session placement is pinned to tmux metadata (`@cb_home_path`) written by `cb start`.
+- Sessions without valid home metadata are grouped under `(main repo)` for their owning configured project.
 
 ### `cb list`
 

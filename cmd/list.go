@@ -45,6 +45,15 @@ func sessionStatusFromWindows(detector listAgentDetector, session string, wins [
 	return rollupStatuses(statuses)
 }
 
+func formatListSessionLine(s discovery.SessionNode) string {
+	windowCount := len(s.Windows)
+	windowWord := "windows"
+	if windowCount == 1 {
+		windowWord = "window"
+	}
+	return fmt.Sprintf("    %-30s %d %s  (%s)", s.Name, windowCount, windowWord, s.Status)
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all active ClawdBay sessions",
@@ -79,12 +88,7 @@ var listCmd = &cobra.Command{
 				}
 
 				for _, s := range wt.Sessions {
-					windowCount := len(s.Windows)
-					windowWord := "windows"
-					if windowCount == 1 {
-						windowWord = "window"
-					}
-					fmt.Printf("    %-30s %d %s  (%s)\n", s.Name, windowCount, windowWord, s.Status)
+					fmt.Println(formatListSessionLine(s))
 				}
 			}
 		}

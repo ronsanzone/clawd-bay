@@ -105,6 +105,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err := tmuxClient.CreateSession(sessionName, worktreeDir); err != nil {
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
+	persistSessionHomePath(tmuxClient, sessionName, worktreeDir, startErrWriter)
 
 	// Create Claude window
 	if err := tmuxClient.CreateWindowWithShell(sessionName, "claude", "claude"); err != nil {
@@ -122,6 +123,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return tmuxClient.SwitchClient(sessionName)
 	}
 	return tmuxClient.AttachSession(sessionName)
+}
+
+type sessionOptionSetter interface {
+	SetSessionOption(session, key, value string) error
+}
+
+func persistSessionHomePath(tmuxClient sessionOptionSetter, sessionName, worktreeDir string, errWriter io.Writer) {
+	canonicalHomePath, err := config.CanonicalPath(worktreeDir)
+	if err != nil {
+		fmt.Fprintf(errWriter, "Warning: failed to canonicalize session home path for %s: %v\n", sessionName, err)
+		return
+	}
+
+	if err := tmuxClient.SetSessionOption(sessionName, tmux.SessionOptionHomePath, canonicalHomePath); err != nil {
+		fmt.Fprintf(errWriter, "Warning: failed to set tmux session home metadata for %s: %v\n", sessionName, err)
+	}
 }
 
 // sanitizeBranchName converts a string to a valid git branch name.

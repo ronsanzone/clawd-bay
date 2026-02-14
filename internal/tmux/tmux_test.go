@@ -671,6 +671,91 @@ func TestClient_SelectWindow(t *testing.T) {
 	}
 }
 
+func TestClient_SetSessionOption(t *testing.T) {
+	var capturedArgs []string
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			capturedArgs = append([]string{name}, args...)
+			return nil, nil
+		},
+	}
+
+	err := client.SetSessionOption("cb_test", "@cb_home_path", "/tmp/repo/.worktrees/repo-branch")
+	if err != nil {
+		t.Fatalf("SetSessionOption() error = %v", err)
+	}
+
+	expected := []string{"tmux", "set-option", "-t", "cb_test", "@cb_home_path", "/tmp/repo/.worktrees/repo-branch"}
+	if len(capturedArgs) != len(expected) {
+		t.Fatalf("args = %v, want %v", capturedArgs, expected)
+	}
+	for i, arg := range expected {
+		if capturedArgs[i] != arg {
+			t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+		}
+	}
+}
+
+func TestClient_SetSessionOption_Error(t *testing.T) {
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("tmux error")
+		},
+	}
+
+	err := client.SetSessionOption("cb_test", "@cb_home_path", "/tmp/path")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to set option") {
+		t.Errorf("error = %q, want to contain 'failed to set option'", err)
+	}
+}
+
+func TestClient_GetSessionOption(t *testing.T) {
+	var capturedArgs []string
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			capturedArgs = append([]string{name}, args...)
+			return []byte("/tmp/repo/.worktrees/repo-branch\n"), nil
+		},
+	}
+
+	got, err := client.GetSessionOption("cb_test", "@cb_home_path")
+	if err != nil {
+		t.Fatalf("GetSessionOption() error = %v", err)
+	}
+	if got != "/tmp/repo/.worktrees/repo-branch" {
+		t.Fatalf("GetSessionOption() = %q, want %q", got, "/tmp/repo/.worktrees/repo-branch")
+	}
+
+	expected := []string{"tmux", "show-options", "-t", "cb_test", "-v", "@cb_home_path"}
+	if len(capturedArgs) != len(expected) {
+		t.Fatalf("args = %v, want %v", capturedArgs, expected)
+	}
+	for i, arg := range expected {
+		if capturedArgs[i] != arg {
+			t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+		}
+	}
+}
+
+func TestClient_GetSessionOption_Error(t *testing.T) {
+	client := &Client{
+		execCommand: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("tmux error")
+		},
+	}
+
+	_, err := client.GetSessionOption("cb_test", "@cb_home_path")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get option") {
+		t.Errorf("error = %q, want to contain 'failed to get option'", err)
+	}
+}
+
 func TestClient_AttachOrSwitchToSession(t *testing.T) {
 	t.Run("switches when inside tmux", func(t *testing.T) {
 		var capturedArgs []string
@@ -744,14 +829,80 @@ func TestClient_GetPaneWorkingDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var capturedArgs []string
 			client := &Client{
 				execCommand: func(name string, args ...string) ([]byte, error) {
+					capturedArgs = append([]string{name}, args...)
 					return []byte(tt.output), tt.err
 				},
 			}
-			result := client.GetPaneWorkingDir(tt.name)
+			result := client.GetPaneWorkingDir("cb_test")
 			if result != tt.expected {
 				t.Errorf("GetPaneWorkingDir() = %q, want %q", result, tt.expected)
+			}
+			expected := []string{"tmux", "display-message", "-t", "cb_test:0", "-p", "#{pane_current_path}"}
+			if len(capturedArgs) != len(expected) {
+				t.Fatalf("args = %v, want %v", capturedArgs, expected)
+			}
+			for i, arg := range expected {
+				if capturedArgs[i] != arg {
+					t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+				}
+			}
+		})
+	}
+}
+
+func TestClient_GetWindowWorkingDir(t *testing.T) {
+	tests := []struct {
+		name           string
+		output         string
+		err            error
+		session        string
+		windowIndex    int
+		expected       string
+		expectedTarget string
+	}{
+		{
+			name:           "valid path",
+			output:         "/Users/ron/code/project/.worktrees/project-feat-auth\n",
+			session:        "cb_test",
+			windowIndex:    3,
+			expected:       "/Users/ron/code/project/.worktrees/project-feat-auth",
+			expectedTarget: "cb_test:3",
+		},
+		{
+			name:           "error returns empty",
+			output:         "",
+			err:            errors.New("no pane"),
+			session:        "cb_test",
+			windowIndex:    2,
+			expected:       "",
+			expectedTarget: "cb_test:2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedArgs []string
+			client := &Client{
+				execCommand: func(name string, args ...string) ([]byte, error) {
+					capturedArgs = append([]string{name}, args...)
+					return []byte(tt.output), tt.err
+				},
+			}
+			result := client.GetWindowWorkingDir(tt.session, tt.windowIndex)
+			if result != tt.expected {
+				t.Errorf("GetWindowWorkingDir() = %q, want %q", result, tt.expected)
+			}
+			expected := []string{"tmux", "display-message", "-t", tt.expectedTarget, "-p", "#{pane_current_path}"}
+			if len(capturedArgs) != len(expected) {
+				t.Fatalf("args = %v, want %v", capturedArgs, expected)
+			}
+			for i, arg := range expected {
+				if capturedArgs[i] != arg {
+					t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
+				}
 			}
 		})
 	}

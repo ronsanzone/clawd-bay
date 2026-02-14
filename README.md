@@ -53,7 +53,8 @@ name = "repo-a" # optional
 Notes:
 - Paths are canonicalized via symlink resolution when added.
 - `cb dash` and `cb list` only show configured projects.
-- Sessions running from a configured repo root (outside `.worktrees/`) appear under `(main repo)`.
+- Session placement is pinned to tmux metadata (`@cb_home_path`) set by `cb start`, so grouping stays stable as pane cwd changes.
+- Sessions missing valid home metadata are grouped under `(main repo)` for their owning configured project.
 - If you run `cb start` from an unconfigured repo, ClawdBay warns that the session will not appear in `cb dash` / `cb list`.
 
 ## Documentation

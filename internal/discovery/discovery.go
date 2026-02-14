@@ -18,6 +18,7 @@ type TmuxInspector interface {
 	ListSessions() ([]tmux.Session, error)
 	ListWindows(session string) ([]tmux.Window, error)
 	GetPaneWorkingDir(session string) string
+	GetSessionOption(session, key string) (string, error)
 	DetectAgentInfo(session, window string) tmux.AgentInfo
 }
 
@@ -205,23 +206,8 @@ func (s *Service) overlaySessions(projects []runtimeProject, result *Result) err
 	}
 
 	for _, session := range sessions {
-		panePath := s.tmuxClient.GetPaneWorkingDir(session.Name)
-		if panePath == "" {
-			continue
-		}
-
-		canonicalPanePath, canonicalErr := config.CanonicalPath(panePath)
-		if canonicalErr != nil {
-			continue
-		}
-
-		projectIndex := bestProjectMatch(projects, canonicalPanePath)
-		if projectIndex < 0 {
-			continue
-		}
-
-		worktreeIndex := bestWorktreeMatch(projects[projectIndex].node.Worktrees, canonicalPanePath)
-		if worktreeIndex < 0 {
+		projectIndex, worktreeIndex := s.sessionPlacement(projects, session.Name)
+		if projectIndex < 0 || worktreeIndex < 0 {
 			continue
 		}
 
@@ -243,7 +229,6 @@ func (s *Service) overlaySessions(projects []runtimeProject, result *Result) err
 				windowStatuses = append(windowStatuses, info.Status)
 			}
 		}
-
 		projects[projectIndex].node.Worktrees[worktreeIndex].Sessions = append(
 			projects[projectIndex].node.Worktrees[worktreeIndex].Sessions,
 			SessionNode{
@@ -255,6 +240,53 @@ func (s *Service) overlaySessions(projects []runtimeProject, result *Result) err
 	}
 
 	return nil
+}
+
+func (s *Service) sessionPlacement(projects []runtimeProject, sessionName string) (projectIndex, worktreeIndex int) {
+	projectIndex, worktreeIndex = s.sessionPlacementFromPinnedHome(projects, sessionName)
+	if projectIndex >= 0 && worktreeIndex >= 0 {
+		return projectIndex, worktreeIndex
+	}
+
+	// Unpinned/invalid pinned sessions are owned by pane cwd, but always grouped
+	// under the project's synthetic "(main repo)" node.
+	panePath := s.tmuxClient.GetPaneWorkingDir(sessionName)
+	if panePath == "" {
+		return -1, -1
+	}
+	canonicalPanePath, err := config.CanonicalPath(panePath)
+	if err != nil {
+		return -1, -1
+	}
+	projectIndex = bestProjectMatch(projects, canonicalPanePath)
+	if projectIndex < 0 {
+		return -1, -1
+	}
+
+	return projectIndex, mainRepoWorktreeIndex(projects[projectIndex].node.Worktrees)
+}
+
+func (s *Service) sessionPlacementFromPinnedHome(projects []runtimeProject, sessionName string) (projectIndex, worktreeIndex int) {
+	homePath, err := s.tmuxClient.GetSessionOption(sessionName, tmux.SessionOptionHomePath)
+	if err != nil || strings.TrimSpace(homePath) == "" {
+		return -1, -1
+	}
+
+	canonicalHomePath, err := config.CanonicalPath(homePath)
+	if err != nil {
+		return -1, -1
+	}
+
+	projectIndex = bestProjectMatch(projects, canonicalHomePath)
+	if projectIndex < 0 {
+		return -1, -1
+	}
+
+	worktreeIndex = bestWorktreeMatch(projects[projectIndex].node.Worktrees, canonicalHomePath)
+	if worktreeIndex < 0 {
+		return -1, -1
+	}
+	return projectIndex, worktreeIndex
 }
 
 func bestProjectMatch(projects []runtimeProject, path string) int {
@@ -288,6 +320,15 @@ func bestWorktreeMatch(worktrees []WorktreeNode, path string) int {
 		}
 	}
 	return best
+}
+
+func mainRepoWorktreeIndex(worktrees []WorktreeNode) int {
+	for i := range worktrees {
+		if worktrees[i].IsMainRepo {
+			return i
+		}
+	}
+	return -1
 }
 
 func relativeWorktreeName(projectPath, worktreePath string) string {

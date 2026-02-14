@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/rsanzone/clawdbay/internal/discovery"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 )
 
@@ -72,4 +74,31 @@ func TestSessionStatusFromWindows_NoDetectedAgents(t *testing.T) {
 	if got != tmux.StatusDone {
 		t.Fatalf("sessionStatusFromWindows() = %q, want %q", got, tmux.StatusDone)
 	}
+}
+
+func TestFormatListSessionLine(t *testing.T) {
+	t.Run("formats status and plural windows", func(t *testing.T) {
+		line := formatListSessionLine(discovery.SessionNode{
+			Name:    "cb_demo",
+			Status:  tmux.StatusWorking,
+			Windows: []tmux.Window{{Name: "a"}, {Name: "b"}},
+		})
+		if !strings.Contains(line, "(WORKING)") {
+			t.Fatalf("line = %q, want status", line)
+		}
+		if !strings.Contains(line, "2 windows") {
+			t.Fatalf("line = %q, want plural windows", line)
+		}
+	})
+
+	t.Run("singular window wording", func(t *testing.T) {
+		line := formatListSessionLine(discovery.SessionNode{
+			Name:    "cb_demo",
+			Status:  tmux.StatusIdle,
+			Windows: []tmux.Window{{Name: "a"}},
+		})
+		if !strings.Contains(line, "1 window") {
+			t.Fatalf("line = %q, want singular window", line)
+		}
+	})
 }

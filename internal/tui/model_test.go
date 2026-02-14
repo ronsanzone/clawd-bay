@@ -5,8 +5,18 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rsanzone/clawdbay/internal/discovery"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 )
+
+type stubDiscoverer struct {
+	result discovery.Result
+	err    error
+}
+
+func (s stubDiscoverer) Discover() (discovery.Result, error) {
+	return s.result, s.err
+}
 
 func TestRollupStatus(t *testing.T) {
 	tests := []struct {
@@ -460,5 +470,41 @@ func TestAgentsModeIgnoresTreeAndCreateKeys(t *testing.T) {
 	}
 	if m.StatusMsg != "" {
 		t.Fatalf("StatusMsg should remain empty, got %q", m.StatusMsg)
+	}
+}
+
+func TestFetchGroups_MapsSessionFields(t *testing.T) {
+	discoverer := stubDiscoverer{
+		result: discovery.Result{
+			Projects: []discovery.ProjectNode{{
+				Name: "repo",
+				Path: "/tmp/repo",
+				Worktrees: []discovery.WorktreeNode{{
+					Name:       "(main repo)",
+					Path:       "/tmp/repo",
+					IsMainRepo: true,
+					Sessions: []discovery.SessionNode{{
+						Name:    "cb_demo",
+						Status:  tmux.StatusWaiting,
+						Windows: []tmux.Window{{Index: 1, Name: "claude"}},
+					}},
+				}},
+			}},
+		},
+	}
+
+	groups, _, _, _, err := fetchGroups(discoverer)
+	if err != nil {
+		t.Fatalf("fetchGroups() error = %v", err)
+	}
+	if len(groups) != 1 || len(groups[0].Worktrees) != 1 || len(groups[0].Worktrees[0].Sessions) != 1 {
+		t.Fatalf("unexpected groups: %+v", groups)
+	}
+	session := groups[0].Worktrees[0].Sessions[0]
+	if session.Name != "cb_demo" {
+		t.Fatalf("Name = %q, want cb_demo", session.Name)
+	}
+	if session.Status != tmux.StatusWaiting {
+		t.Fatalf("Status = %q, want %q", session.Status, tmux.StatusWaiting)
 	}
 }

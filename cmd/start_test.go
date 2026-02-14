@@ -2,13 +2,31 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rsanzone/clawdbay/internal/config"
+	"github.com/rsanzone/clawdbay/internal/tmux"
 )
+
+type fakeSessionOptionSetter struct {
+	called  bool
+	session string
+	key     string
+	value   string
+	err     error
+}
+
+func (f *fakeSessionOptionSetter) SetSessionOption(session, key, value string) error {
+	f.called = true
+	f.session = session
+	f.key = key
+	f.value = value
+	return f.err
+}
 
 func TestSanitizeBranchName(t *testing.T) {
 	tests := []struct {
@@ -113,6 +131,76 @@ func TestRunStart_RejectsEmptySanitizedBranch(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid after sanitization") {
 		t.Fatalf("error = %q, want to contain %q", err.Error(), "invalid after sanitization")
 	}
+}
+
+func TestPersistSessionHomePath(t *testing.T) {
+	t.Run("sets canonical home path metadata", func(t *testing.T) {
+		repo := t.TempDir()
+		worktreeDir := filepath.Join(repo, ".worktrees", "repo-feature")
+		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+			t.Fatalf("mkdir worktree: %v", err)
+		}
+
+		canonicalWorktreeDir, err := config.CanonicalPath(worktreeDir)
+		if err != nil {
+			t.Fatalf("CanonicalPath() error = %v", err)
+		}
+
+		setter := &fakeSessionOptionSetter{}
+		var stderr bytes.Buffer
+
+		persistSessionHomePath(setter, "cb_feature", worktreeDir, &stderr)
+
+		if !setter.called {
+			t.Fatal("SetSessionOption() was not called")
+		}
+		if setter.session != "cb_feature" {
+			t.Fatalf("session = %q, want %q", setter.session, "cb_feature")
+		}
+		if setter.key != tmux.SessionOptionHomePath {
+			t.Fatalf("key = %q, want %q", setter.key, tmux.SessionOptionHomePath)
+		}
+		if setter.value != canonicalWorktreeDir {
+			t.Fatalf("value = %q, want %q", setter.value, canonicalWorktreeDir)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+	})
+
+	t.Run("warns when canonicalization fails", func(t *testing.T) {
+		setter := &fakeSessionOptionSetter{}
+		var stderr bytes.Buffer
+
+		persistSessionHomePath(setter, "cb_feature", filepath.Join(t.TempDir(), "missing"), &stderr)
+
+		if setter.called {
+			t.Fatal("SetSessionOption() should not be called when canonicalization fails")
+		}
+		if !strings.Contains(stderr.String(), "failed to canonicalize session home path") {
+			t.Fatalf("stderr = %q, want canonicalization warning", stderr.String())
+		}
+	})
+
+	t.Run("warns when setting tmux option fails", func(t *testing.T) {
+		repo := t.TempDir()
+		worktreeDir := filepath.Join(repo, ".worktrees", "repo-feature")
+		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+			t.Fatalf("mkdir worktree: %v", err)
+		}
+
+		setter := &fakeSessionOptionSetter{err: errors.New("tmux failure")}
+		var stderr bytes.Buffer
+
+		persistSessionHomePath(setter, "cb_feature", worktreeDir, &stderr)
+
+		if !setter.called {
+			t.Fatal("SetSessionOption() was not called")
+		}
+		if !strings.Contains(stderr.String(), "failed to set tmux session home metadata") {
+			t.Fatalf("stderr = %q, want tmux metadata warning", stderr.String())
+		}
+	})
 }
 
 func TestWarnIfRepoNotConfigured(t *testing.T) {
