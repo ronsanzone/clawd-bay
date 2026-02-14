@@ -1,4 +1,4 @@
-.PHONY: build test test-integration lint verify install clean run debug
+.PHONY: build test test-integration lint verify install clean run debug smoke
 
 build:
 	go build -o cb main.go
@@ -8,6 +8,9 @@ run: build
 
 debug: build
 	./cb --debug
+
+smoke: build
+	./cb --help
 
 test:
 	go test ./...
