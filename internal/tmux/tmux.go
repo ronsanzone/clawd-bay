@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -84,11 +85,22 @@ func NewClient() *Client {
 			return exec.Command(name, args...).Output()
 		},
 		execInteractive: func(name string, args ...string) error {
-			cmd := exec.Command(name, args...)
-			// Interactive commands need terminal access, not output capture
-			return cmd.Run()
+			return runInteractiveCommand(name, args...)
 		},
 	}
+}
+
+func runInteractiveCommand(name string, args ...string) error {
+	return newInteractiveCommand(name, args...).Run()
+}
+
+func newInteractiveCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	// Interactive tmux commands require direct terminal streams.
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
 }
 
 // ListSessions returns all ClawdBay tmux sessions.

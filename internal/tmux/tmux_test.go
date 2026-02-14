@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -510,6 +511,22 @@ func TestClient_CreateSession(t *testing.T) {
 		if capturedArgs[i] != arg {
 			t.Errorf("arg[%d] = %q, want %q", i, capturedArgs[i], arg)
 		}
+	}
+}
+
+func TestRunInteractiveCommand_WiresTerminalIO(t *testing.T) {
+	cmd := newInteractiveCommand("tmux", "attach-session", "-t", "cb_demo")
+	if cmd.Stdin != os.Stdin {
+		t.Fatal("stdin is not wired to os.Stdin")
+	}
+	if cmd.Stdout != os.Stdout {
+		t.Fatal("stdout is not wired to os.Stdout")
+	}
+	if cmd.Stderr != os.Stderr {
+		t.Fatal("stderr is not wired to os.Stderr")
+	}
+	if cmd.Path == "" {
+		t.Fatal("expected resolved command path")
 	}
 }
 
