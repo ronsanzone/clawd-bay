@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rsanzone/clawdbay/internal/config"
 )
 
 func TestSanitizeBranchName(t *testing.T) {
@@ -110,4 +113,50 @@ func TestRunStart_RejectsEmptySanitizedBranch(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid after sanitization") {
 		t.Fatalf("error = %q, want to contain %q", err.Error(), "invalid after sanitization")
 	}
+}
+
+func TestWarnIfRepoNotConfigured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repo := filepath.Join(home, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	originalWriter := startErrWriter
+	defer func() { startErrWriter = originalWriter }()
+
+	t.Run("prints warning when repo missing from config", func(t *testing.T) {
+		var stderr bytes.Buffer
+		startErrWriter = &stderr
+
+		if err := warnIfRepoNotConfigured(repo); err != nil {
+			t.Fatalf("warnIfRepoNotConfigured() error = %v", err)
+		}
+		if !strings.Contains(stderr.String(), "not configured") {
+			t.Fatalf("stderr = %q, want warning", stderr.String())
+		}
+	})
+
+	t.Run("no warning when repo is configured", func(t *testing.T) {
+		if err := config.SaveUserConfig(config.UserConfig{
+			Version: config.SupportedConfigVersion,
+			Projects: []config.ProjectConfig{
+				{Path: repo, Name: "repo"},
+			},
+		}); err != nil {
+			t.Fatalf("SaveUserConfig() error = %v", err)
+		}
+
+		var stderr bytes.Buffer
+		startErrWriter = &stderr
+
+		if err := warnIfRepoNotConfigured(repo); err != nil {
+			t.Fatalf("warnIfRepoNotConfigured() error = %v", err)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+	})
 }

@@ -31,7 +31,7 @@ func TestCLI_Help(t *testing.T) {
 		t.Fatalf("help command failed: %v", err)
 	}
 
-	expected := []string{"start", "claude", "list", "archive", "dash"}
+	expected := []string{"start", "claude", "list", "archive", "dash", "project"}
 	for _, sub := range expected {
 		if !strings.Contains(string(output), sub) {
 			t.Errorf("help missing subcommand: %s", sub)
@@ -52,7 +52,6 @@ func buildTestBinary(t *testing.T) string {
 	}
 	return binaryPath
 }
-
 
 // TestCLI_StartWorkflow tests the full cb start workflow end-to-end.
 // This test:
@@ -153,4 +152,3 @@ func TestCLI_StartWorkflow(t *testing.T) {
 		}
 	}
 }
-

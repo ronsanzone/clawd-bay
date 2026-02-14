@@ -58,7 +58,10 @@ func (m Model) renderTree(width int) string {
 		if m.Mode == DashboardModeAgents {
 			return "No detected agent windows.\n  Start an agent in any tmux window."
 		}
-		return "No active sessions.\n  Start one with: cb start <branch-name>"
+		if m.ConfigMissing {
+			return "No project config found.\n  Add one with: cb project add <path>"
+		}
+		return "No configured projects.\n  Add one with: cb project add <path>"
 	}
 
 	lines := m.buildDisplayLines(nodes)
@@ -77,7 +80,6 @@ func (m Model) renderTree(width int) string {
 		result = append(result, padToWidth(line, width))
 	}
 
-	// Pad remaining lines to fill treeHeight
 	for len(result) < treeHeight {
 		result = append(result, strings.Repeat(" ", width))
 	}
@@ -118,19 +120,31 @@ func (m Model) renderNodeLine(node TreeNode, nodeIdx int) string {
 		if repo.Expanded {
 			icon = "▼"
 		}
-		line = cursor + icon + " " + m.Styles.Repo.Render(repo.Name)
+		if repo.InvalidError != "" {
+			line = cursor + icon + " " + m.Styles.Repo.Render(repo.Name) + " " + m.Styles.StatusWaiting.Render("[INVALID]")
+		} else {
+			line = cursor + icon + " " + m.Styles.Repo.Render(repo.Name)
+		}
+
+	case NodeWorktree:
+		worktree := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex]
+		icon := "▸"
+		if worktree.Expanded {
+			icon = "▼"
+		}
+		line = cursor + "  " + icon + " " + m.Styles.StatusDone.Render(worktree.Name)
 
 	case NodeSession:
-		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
+		session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
 		icon := "▸"
 		if session.Expanded {
 			icon = "▼"
 		}
 		badge := m.renderStatusBadge(session.Status)
-		line = cursor + "  " + icon + " " + badge + " " + m.Styles.Session.Render(session.Name)
+		line = cursor + "    " + icon + " " + badge + " " + m.Styles.Session.Render(session.Name)
 
 	case NodeWindow:
-		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
+		session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
 		key := session.Name + ":" + window.Name
 		badge := " "
@@ -182,7 +196,6 @@ func (m Model) renderAgentTag(agentType tmux.AgentType) string {
 }
 
 // renderStatusBadge renders a colored status badge.
-// Badge symbols show activity level: • (working) > ◐ (waiting) > ◦ (idle) > · (done)
 func (m Model) renderStatusBadge(status tmux.Status) string {
 	switch status {
 	case tmux.StatusWorking:
@@ -191,7 +204,7 @@ func (m Model) renderStatusBadge(status tmux.Status) string {
 		return m.Styles.StatusWaiting.Render("◐")
 	case tmux.StatusIdle:
 		return m.Styles.StatusIdle.Render("◦")
-	default: // StatusDone
+	default:
 		return m.Styles.StatusDone.Render("·")
 	}
 }
@@ -245,6 +258,8 @@ func (m Model) renderFooter() string {
 	switch node.Type {
 	case NodeRepo:
 		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q quit"
+	case NodeWorktree:
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q quit"
 	case NodeSession:
 		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q quit"
 	case NodeWindow:
@@ -271,35 +286,28 @@ func (m Model) renderFrame(tree, statusBar, footer string) string {
 		title +
 		bStyle.Render(strings.Repeat(border.Top, max(0, w-titleW-3))+border.TopRight)
 
-	// Middle separator: ├─────────────────────────────┤
 	midLine := bStyle.Render(border.MiddleLeft) +
 		bStyle.Render(strings.Repeat(border.Top, w-2)) +
 		bStyle.Render(border.MiddleRight)
 
-	// Bottom border with footer: ╰─ enter attach · q quit ────╯
 	footerText := m.Styles.Footer.Render(" " + footer + " ")
 	footerW := lipgloss.Width(footerText)
 	botLine := bStyle.Render(border.BottomLeft+border.Bottom) +
 		footerText +
 		bStyle.Render(strings.Repeat(border.Bottom, max(0, w-footerW-3))+border.BottomRight)
 
-	// Side borders for content
 	side := bStyle.Render(border.Left)
 	sideR := bStyle.Render(border.Right)
 
 	var lines []string
 	lines = append(lines, topLine)
 
-	// Tree content with side borders
 	for _, cl := range strings.Split(tree, "\n") {
 		lines = append(lines, side+padToWidth(cl, w-2)+sideR)
 	}
 
-	// Separator + status bar
 	lines = append(lines, midLine)
 	lines = append(lines, side+padToWidth(statusBar, w-2)+sideR)
-
-	// Bottom
 	lines = append(lines, botLine)
 
 	return strings.Join(lines, "\n")

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/rsanzone/clawdbay/internal/discovery"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -49,48 +50,42 @@ var listCmd = &cobra.Command{
 	Short: "List all active ClawdBay sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tmuxClient := tmux.NewClient()
-		sessions, err := tmuxClient.ListSessions()
+		result, err := discovery.NewService(tmuxClient).Discover()
 		if err != nil {
 			return err
 		}
 
-		if len(sessions) == 0 {
-			fmt.Println("No active sessions. Start one with: cb start <branch-name>")
+		if result.ConfigMissing {
+			fmt.Println("No project config found. Add one with: cb project add <path>")
 			return nil
 		}
 
-		// Group by repo
-		repoSessions := make(map[string][]tmux.Session)
-		var repoOrder []string
-
-		for _, s := range sessions {
-			repoName := tmuxClient.GetRepoName(s.Name)
-			if _, exists := repoSessions[repoName]; !exists {
-				repoOrder = append(repoOrder, repoName)
-			}
-			repoSessions[repoName] = append(repoSessions[repoName], s)
+		if len(result.Projects) == 0 {
+			fmt.Println("No configured projects. Add one with: cb project add <path>")
+			return nil
 		}
 
-		for _, repoName := range repoOrder {
-			fmt.Println(repoName)
-			for _, s := range repoSessions[repoName] {
-				wins, winErr := tmuxClient.ListWindows(s.Name)
-				windowCount := 0
-				if winErr == nil {
-					windowCount = len(wins)
+		for _, project := range result.Projects {
+			fmt.Println(project.Name)
+			if project.InvalidError != "" {
+				fmt.Printf("  [INVALID] %s\n", project.InvalidError)
+			}
+
+			for _, wt := range project.Worktrees {
+				fmt.Printf("  %s\n", wt.Name)
+				if len(wt.Sessions) == 0 {
+					fmt.Println("    (no active session)")
+					continue
 				}
 
-				// Get rolled-up status
-				status := tmux.StatusDone
-				if winErr == nil {
-					status = sessionStatusFromWindows(tmuxClient, s.Name, wins)
+				for _, s := range wt.Sessions {
+					windowCount := len(s.Windows)
+					windowWord := "windows"
+					if windowCount == 1 {
+						windowWord = "window"
+					}
+					fmt.Printf("    %-30s %d %s  (%s)\n", s.Name, windowCount, windowWord, s.Status)
 				}
-
-				windowWord := "windows"
-				if windowCount == 1 {
-					windowWord = "window"
-				}
-				fmt.Printf("  %-30s %d %s  (%s)\n", s.Name, windowCount, windowWord, status)
 			}
 		}
 		return nil

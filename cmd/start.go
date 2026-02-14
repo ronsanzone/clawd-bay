@@ -2,16 +2,19 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/rsanzone/clawdbay/internal/config"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
 var startDetach bool
+var startErrWriter io.Writer = os.Stderr
 
 var startCmd = &cobra.Command{
 	Use:   "start <branch-name>",
@@ -40,6 +43,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Verify we're in a git repository
 	if _, err := exec.Command("git", "rev-parse", "--git-dir").Output(); err != nil {
 		return fmt.Errorf("not in a git repository")
+	}
+	repoTopLevelOutput, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return fmt.Errorf("failed to determine repository root: %w", err)
+	}
+	if err := warnIfRepoNotConfigured(strings.TrimSpace(string(repoTopLevelOutput))); err != nil {
+		return err
 	}
 
 	// Get current directory info
@@ -135,6 +145,31 @@ func sanitizeBranchName(name string) string {
 	}
 
 	return strings.Trim(cleaned, "-")
+}
+
+func warnIfRepoNotConfigured(repoPath string) error {
+	cfg, _, err := config.LoadUserConfigWithMeta()
+	if err != nil {
+		return err
+	}
+
+	canonicalRepoPath, err := config.CanonicalPath(repoPath)
+	if err != nil {
+		return nil
+	}
+
+	for _, p := range cfg.Projects {
+		canonicalProjectPath, canonicalErr := config.CanonicalPath(p.Path)
+		if canonicalErr != nil {
+			continue
+		}
+		if canonicalProjectPath == canonicalRepoPath {
+			return nil
+		}
+	}
+
+	fmt.Fprintln(startErrWriter, "Warning: current repo is not configured; sessions started here will not appear in `cb dash` or `cb list`.")
+	return nil
 }
 
 // ensureGitignoreEntry adds an entry to .gitignore if not already present.

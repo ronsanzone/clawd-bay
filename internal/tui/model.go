@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rsanzone/clawdbay/internal/discovery"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 )
 
@@ -21,6 +22,8 @@ type refreshMsg struct {
 	AgentRows      []AgentWindowRow
 	WindowStatuses map[string]tmux.Status
 	WindowAgents   map[string]tmux.AgentType
+	ConfigMissing  bool
+	Err            error
 }
 
 // claudeWindowMsg is sent after attempting to create a Claude window.
@@ -32,9 +35,11 @@ type claudeWindowMsg struct {
 type NodeType int
 
 const (
-	// NodeRepo is a repository group node.
+	// NodeRepo is a configured project node.
 	NodeRepo NodeType = iota
-	// NodeSession is a worktree session node.
+	// NodeWorktree is a discovered worktree node.
+	NodeWorktree
+	// NodeSession is a tmux session node.
 	NodeSession
 	// NodeWindow is a tmux window node.
 	NodeWindow
@@ -64,12 +69,22 @@ func ParseDashboardMode(raw string) (DashboardMode, error) {
 	}
 }
 
-// RepoGroup represents a repository with its worktree sessions.
+// RepoGroup represents a configured project and its discovered worktrees.
 type RepoGroup struct {
-	Name     string
-	Path     string
-	Sessions []WorktreeSession
-	Expanded bool
+	Name         string
+	Path         string
+	InvalidError string
+	Worktrees    []WorktreeGroup
+	Expanded     bool
+}
+
+// WorktreeGroup represents one discovered worktree path under a project.
+type WorktreeGroup struct {
+	Name       string
+	Path       string
+	IsMainRepo bool
+	Sessions   []WorktreeSession
+	Expanded   bool
 }
 
 // WorktreeSession represents a tmux session tied to a worktree.
@@ -82,11 +97,12 @@ type WorktreeSession struct {
 
 // TreeNode represents a flattened position in the tree for cursor navigation.
 type TreeNode struct {
-	Type         NodeType
-	RepoIndex    int
-	SessionIndex int
-	WindowIndex  int
-	AgentIndex   int
+	Type          NodeType
+	RepoIndex     int
+	WorktreeIndex int
+	SessionIndex  int
+	WindowIndex   int
+	AgentIndex    int
 }
 
 // AgentWindowRow represents one detected coding-agent window across all tmux sessions.
@@ -98,6 +114,11 @@ type AgentWindowRow struct {
 	AgentType   tmux.AgentType
 	Status      tmux.Status
 	Managed     bool
+}
+
+// Discoverer loads the project/worktree/session hierarchy.
+type Discoverer interface {
+	Discover() (discovery.Result, error)
 }
 
 // Model is the Bubbletea model for the dashboard.
@@ -113,6 +134,7 @@ type Model struct {
 	FilteredCursor      int
 	Quitting            bool
 	TmuxClient          *tmux.Client
+	Discoverer          Discoverer
 	SelectedName        string
 	SelectedWindow      string
 	SelectedWindowIndex int
@@ -122,7 +144,8 @@ type Model struct {
 	Height              int
 	ScrollOffset        int
 	Styles              Styles
-	StatusMsg           string // transient feedback message shown in status bar
+	StatusMsg           string
+	ConfigMissing       bool
 }
 
 // RollupStatus returns the most active status from a slice.
@@ -167,69 +190,21 @@ func (m Model) SessionCounts() (total, working, waiting, idle int) {
 	}
 
 	for _, g := range m.Groups {
-		for _, s := range g.Sessions {
-			total++
-			switch s.Status {
-			case tmux.StatusWorking:
-				working++
-			case tmux.StatusWaiting:
-				waiting++
-			case tmux.StatusIdle:
-				idle++
+		for _, wt := range g.Worktrees {
+			for _, s := range wt.Sessions {
+				total++
+				switch s.Status {
+				case tmux.StatusWorking:
+					working++
+				case tmux.StatusWaiting:
+					waiting++
+				case tmux.StatusIdle:
+					idle++
+				}
 			}
 		}
 	}
 	return
-}
-
-// GroupByRepo groups sessions by their repository name.
-func GroupByRepo(
-	sessions []tmux.Session,
-	repoNames map[string]string,
-	windows map[string][]tmux.Window,
-	statuses map[string]tmux.Status,
-) []RepoGroup {
-	repoMap := make(map[string]*RepoGroup)
-	var repoOrder []string
-
-	for _, session := range sessions {
-		repoName := repoNames[session.Name]
-		if repoName == "" {
-			repoName = "Unknown"
-		}
-
-		if _, exists := repoMap[repoName]; !exists {
-			repoMap[repoName] = &RepoGroup{
-				Name:     repoName,
-				Expanded: true,
-			}
-			repoOrder = append(repoOrder, repoName)
-		}
-
-		wins := windows[session.Name]
-		var windowStatuses []tmux.Status
-		for _, w := range wins {
-			key := session.Name + ":" + w.Name
-			if status, ok := statuses[key]; ok {
-				windowStatuses = append(windowStatuses, status)
-			}
-		}
-
-		ws := WorktreeSession{
-			Name:     session.Name,
-			Status:   RollupStatus(windowStatuses),
-			Windows:  wins,
-			Expanded: true,
-		}
-
-		repoMap[repoName].Sessions = append(repoMap[repoName].Sessions, ws)
-	}
-
-	var groups []RepoGroup
-	for _, name := range repoOrder {
-		groups = append(groups, *repoMap[name])
-	}
-	return groups
 }
 
 // BuildNodes flattens the tree into a list of navigable nodes.
@@ -243,15 +218,23 @@ func BuildNodes(groups []RepoGroup) []TreeNode {
 			continue
 		}
 
-		for si, session := range repo.Sessions {
-			nodes = append(nodes, TreeNode{Type: NodeSession, RepoIndex: ri, SessionIndex: si})
+		for wi, worktree := range repo.Worktrees {
+			nodes = append(nodes, TreeNode{Type: NodeWorktree, RepoIndex: ri, WorktreeIndex: wi})
 
-			if !session.Expanded {
+			if !worktree.Expanded {
 				continue
 			}
 
-			for wi := range session.Windows {
-				nodes = append(nodes, TreeNode{Type: NodeWindow, RepoIndex: ri, SessionIndex: si, WindowIndex: wi})
+			for si, session := range worktree.Sessions {
+				nodes = append(nodes, TreeNode{Type: NodeSession, RepoIndex: ri, WorktreeIndex: wi, SessionIndex: si})
+
+				if !session.Expanded {
+					continue
+				}
+
+				for widx := range session.Windows {
+					nodes = append(nodes, TreeNode{Type: NodeWindow, RepoIndex: ri, WorktreeIndex: wi, SessionIndex: si, WindowIndex: widx})
+				}
 			}
 		}
 	}
@@ -289,14 +272,13 @@ func VisibleRange(lineCount, viewHeight, cursorLine, scrollOffset int) (start, e
 }
 
 // CursorToLine maps a cursor position (node index) to a display line index,
-// accounting for blank separator lines between repo groups.
+// accounting for blank separator lines between project groups.
 func CursorToLine(nodes []TreeNode, cursor int) int {
 	line := 0
 	for i := 0; i < cursor && i < len(nodes); i++ {
 		line++
-		// A repo node that isn't the first means a blank line was inserted before it
 		if i+1 < len(nodes) && nodes[i+1].Type == NodeRepo {
-			line++ // blank separator line
+			line++
 		}
 	}
 	return line
@@ -314,6 +296,7 @@ func InitialModelWithMode(tmuxClient *tmux.Client, mode DashboardMode) Model {
 		Groups:              []RepoGroup{},
 		AgentRows:           []AgentWindowRow{},
 		TmuxClient:          tmuxClient,
+		Discoverer:          discovery.NewService(tmuxClient),
 		WindowStatuses:      make(map[string]tmux.Status),
 		WindowAgentTypes:    make(map[string]tmux.AgentType),
 		SelectedWindowIndex: -1,
@@ -334,85 +317,91 @@ func (m Model) tickCmd() tea.Cmd {
 
 func (m Model) refreshCmd() tea.Cmd {
 	return func() tea.Msg {
-		groups, rows, statuses, agents := fetchDashboardData(m.TmuxClient, m.Mode)
+		groups, rows, statuses, agents, missing, err := fetchDashboardData(m.Discoverer, m.TmuxClient, m.Mode)
 		return refreshMsg{
 			Groups:         groups,
 			AgentRows:      rows,
 			WindowStatuses: statuses,
 			WindowAgents:   agents,
+			ConfigMissing:  missing,
+			Err:            err,
 		}
 	}
 }
 
 // fetchDashboardData queries tmux for all data needed by the selected mode.
 func fetchDashboardData(
+	discoverer Discoverer,
 	tmuxClient *tmux.Client,
 	mode DashboardMode,
-) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
+) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType, bool, error) {
 	switch mode {
 	case DashboardModeAgents:
-		return fetchAgentRowsData(tmuxClient)
+		rows, statuses, agents := fetchAgentRowsData(tmuxClient)
+		return nil, rows, statuses, agents, false, nil
 	default:
-		return fetchWorktreeData(tmuxClient)
+		groups, statuses, agents, missing, err := fetchGroups(discoverer)
+		return groups, nil, statuses, agents, missing, err
 	}
 }
 
-func fetchWorktreeData(
-	tmuxClient *tmux.Client,
-) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
-	slog.Debug("fetchWorktreeData called")
-	if tmuxClient == nil {
-		slog.Debug("fetchWorktreeData: tmuxClient is nil")
-		return nil, nil, nil, nil
+// fetchGroups queries shared discovery data.
+func fetchGroups(discoverer Discoverer) ([]RepoGroup, map[string]tmux.Status, map[string]tmux.AgentType, bool, error) {
+	slog.Debug("fetchGroups called")
+	if discoverer == nil {
+		slog.Debug("fetchGroups: discoverer is nil")
+		return nil, map[string]tmux.Status{}, map[string]tmux.AgentType{}, false, nil
 	}
 
-	sessions, err := tmuxClient.ListSessions()
+	result, err := discoverer.Discover()
 	if err != nil {
-		slog.Debug("fetchWorktreeData: ListSessions failed", "err", err)
-		return nil, nil, nil, nil
+		return nil, nil, nil, false, err
 	}
-	slog.Debug("fetchWorktreeData: found sessions", "count", len(sessions))
 
-	repoNames := make(map[string]string)
-	windowMap := make(map[string][]tmux.Window)
-	statusMap := make(map[string]tmux.Status)
-	agentMap := make(map[string]tmux.AgentType)
-
-	for _, s := range sessions {
-		repoNames[s.Name] = tmuxClient.GetRepoName(s.Name)
-
-		wins, winErr := tmuxClient.ListWindows(s.Name)
-		if winErr != nil {
-			continue
+	groups := make([]RepoGroup, 0, len(result.Projects))
+	for _, p := range result.Projects {
+		group := RepoGroup{
+			Name:         p.Name,
+			Path:         p.Path,
+			InvalidError: p.InvalidError,
+			Expanded:     true,
+			Worktrees:    make([]WorktreeGroup, 0, len(p.Worktrees)),
 		}
-		windowMap[s.Name] = wins
-
-		for _, w := range wins {
-			key := s.Name + ":" + w.Name
-			info := tmuxClient.DetectAgentInfo(s.Name, w.Name)
-			if info.Detected {
-				statusMap[key] = info.Status
-				agentMap[key] = info.Type
+		for _, wt := range p.Worktrees {
+			worktree := WorktreeGroup{
+				Name:       wt.Name,
+				Path:       wt.Path,
+				IsMainRepo: wt.IsMainRepo,
+				Expanded:   true,
+				Sessions:   make([]WorktreeSession, 0, len(wt.Sessions)),
 			}
+			for _, s := range wt.Sessions {
+				worktree.Sessions = append(worktree.Sessions, WorktreeSession{
+					Name:     s.Name,
+					Status:   s.Status,
+					Windows:  s.Windows,
+					Expanded: true,
+				})
+			}
+			group.Worktrees = append(group.Worktrees, worktree)
 		}
+		groups = append(groups, group)
 	}
 
-	return GroupByRepo(sessions, repoNames, windowMap, statusMap), nil, statusMap, agentMap
+	return groups, result.WindowStatuses, result.WindowAgents, result.ConfigMissing, nil
 }
 
-func fetchAgentRowsData(
-	tmuxClient *tmux.Client,
-) ([]RepoGroup, []AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
+func fetchAgentRowsData(tmuxClient *tmux.Client) ([]AgentWindowRow, map[string]tmux.Status, map[string]tmux.AgentType) {
 	slog.Debug("fetchAgentRowsData called")
 	if tmuxClient == nil {
 		slog.Debug("fetchAgentRowsData: tmuxClient is nil")
-		return nil, nil, nil, nil
+		return nil, map[string]tmux.Status{}, map[string]tmux.AgentType{}
 	}
 
 	infos, err := tmuxClient.ListSessionWindowInfo()
 	if err != nil {
 		slog.Debug("fetchAgentRowsData: ListSessionWindowInfo failed", "err", err)
-		return nil, nil, nil, nil
+		return nil, map[string]tmux.Status{}, map[string]tmux.AgentType{}
 	}
 
 	rows := make([]AgentWindowRow, 0, len(infos))
@@ -440,7 +429,7 @@ func fetchAgentRowsData(
 		agentMap[key] = row.AgentType
 	}
 
-	return nil, rows, statusMap, agentMap
+	return rows, statusMap, agentMap
 }
 
 // adjustScroll updates ScrollOffset to keep cursor visible in the viewport.
@@ -514,16 +503,23 @@ func (m *Model) updateFilteredNodes() {
 func (m Model) filterSearchText(node TreeNode) string {
 	switch node.Type {
 	case NodeRepo:
-		return m.Groups[node.RepoIndex].Name
+		group := m.Groups[node.RepoIndex]
+		return group.Name + " " + group.Path
+	case NodeWorktree:
+		group := m.Groups[node.RepoIndex]
+		worktree := group.Worktrees[node.WorktreeIndex]
+		return worktree.Name + " " + worktree.Path + " " + group.Name
 	case NodeSession:
 		group := m.Groups[node.RepoIndex]
-		session := group.Sessions[node.SessionIndex]
-		return session.Name + " " + group.Name
+		worktree := group.Worktrees[node.WorktreeIndex]
+		session := worktree.Sessions[node.SessionIndex]
+		return session.Name + " " + worktree.Name + " " + group.Name
 	case NodeWindow:
 		group := m.Groups[node.RepoIndex]
-		session := group.Sessions[node.SessionIndex]
+		worktree := group.Worktrees[node.WorktreeIndex]
+		session := worktree.Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
-		return window.Name + " " + session.Name + " " + group.Name
+		return window.Name + " " + session.Name + " " + worktree.Name + " " + group.Name
 	case NodeAgentWindow:
 		row := m.AgentRows[node.AgentIndex]
 		return strings.Join([]string{
@@ -556,6 +552,12 @@ func (m Model) cursorForView() int {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case refreshMsg:
+		if msg.Err != nil {
+			m.StatusMsg = fmt.Sprintf("Error: %v", msg.Err)
+			return m, nil
+		}
+		m.ConfigMissing = msg.ConfigMissing
+
 		if m.Mode == DashboardModeAgents {
 			m.AgentRows = msg.AgentRows
 			m.Nodes = BuildAgentNodes(m.AgentRows)
@@ -563,6 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.Groups = mergeExpandState(m.Groups, msg.Groups)
 			m.Nodes = BuildNodes(m.Groups)
+			m.AgentRows = nil
 		}
 		m.WindowStatuses = msg.WindowStatuses
 		m.WindowAgentTypes = msg.WindowAgents
@@ -584,7 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 
 	case tickMsg:
-		m.StatusMsg = "" // clear transient messages on tick
+		m.StatusMsg = ""
 		return m, tea.Batch(m.refreshCmd(), m.tickCmd())
 
 	case tea.WindowSizeMsg:
@@ -702,23 +705,44 @@ func (m *Model) toggleMode() {
 
 // mergeExpandState preserves expand/collapse state across refreshes.
 func mergeExpandState(old, updated []RepoGroup) []RepoGroup {
-	oldState := make(map[string]bool)
-	oldSessionState := make(map[string]bool)
+	repoState := make(map[string]bool)
+	worktreeState := make(map[string]bool)
+	sessionState := make(map[string]bool)
 
 	for _, g := range old {
-		oldState[g.Name] = g.Expanded
-		for _, s := range g.Sessions {
-			oldSessionState[s.Name] = s.Expanded
+		repoKey := g.Path
+		if repoKey == "" {
+			repoKey = g.Name
+		}
+		repoState[repoKey] = g.Expanded
+		for _, wt := range g.Worktrees {
+			worktreeKey := repoKey + "|" + wt.Path
+			worktreeState[worktreeKey] = wt.Expanded
+			for _, s := range wt.Sessions {
+				sessionKey := worktreeKey + "|" + s.Name
+				sessionState[sessionKey] = s.Expanded
+			}
 		}
 	}
 
 	for i := range updated {
-		if expanded, ok := oldState[updated[i].Name]; ok {
+		repoKey := updated[i].Path
+		if repoKey == "" {
+			repoKey = updated[i].Name
+		}
+		if expanded, ok := repoState[repoKey]; ok {
 			updated[i].Expanded = expanded
 		}
-		for j := range updated[i].Sessions {
-			if expanded, ok := oldSessionState[updated[i].Sessions[j].Name]; ok {
-				updated[i].Sessions[j].Expanded = expanded
+		for wi := range updated[i].Worktrees {
+			worktreeKey := repoKey + "|" + updated[i].Worktrees[wi].Path
+			if expanded, ok := worktreeState[worktreeKey]; ok {
+				updated[i].Worktrees[wi].Expanded = expanded
+			}
+			for si := range updated[i].Worktrees[wi].Sessions {
+				sessionKey := worktreeKey + "|" + updated[i].Worktrees[wi].Sessions[si].Name
+				if expanded, ok := sessionState[sessionKey]; ok {
+					updated[i].Worktrees[wi].Sessions[si].Expanded = expanded
+				}
 			}
 		}
 	}
@@ -741,13 +765,20 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.updateFilteredNodes()
 		}
 		m.adjustScroll()
+	case NodeWorktree:
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Expanded = !m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Expanded
+		m.Nodes = BuildNodes(m.Groups)
+		if m.FilterMode {
+			m.updateFilteredNodes()
+		}
+		m.adjustScroll()
 	case NodeSession:
-		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
+		session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
 		m.SelectedName = session.Name
 		m.SelectedWindowIndex = -1
 		return m, tea.Quit
 	case NodeWindow:
-		session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
+		session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
 		window := session.Windows[node.WindowIndex]
 		m.SelectedName = session.Name
 		m.SelectedWindow = window.Name
@@ -774,8 +805,12 @@ func (m Model) handleExpand() (tea.Model, tea.Cmd) {
 		m.Groups[node.RepoIndex].Expanded = true
 		m.Nodes = BuildNodes(m.Groups)
 		m.adjustScroll()
+	case NodeWorktree:
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Expanded = true
+		m.Nodes = BuildNodes(m.Groups)
+		m.adjustScroll()
 	case NodeSession:
-		m.Groups[node.RepoIndex].Sessions[node.SessionIndex].Expanded = true
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Expanded = true
 		m.Nodes = BuildNodes(m.Groups)
 		m.adjustScroll()
 	}
@@ -793,13 +828,16 @@ func (m Model) handleCollapse() (tea.Model, tea.Cmd) {
 		m.Groups[node.RepoIndex].Expanded = false
 		m.Nodes = BuildNodes(m.Groups)
 		m.adjustScroll()
+	case NodeWorktree:
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Expanded = false
+		m.Nodes = BuildNodes(m.Groups)
+		m.adjustScroll()
 	case NodeSession:
-		m.Groups[node.RepoIndex].Sessions[node.SessionIndex].Expanded = false
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Expanded = false
 		m.Nodes = BuildNodes(m.Groups)
 		m.adjustScroll()
 	case NodeWindow:
-		// Collapse parent session
-		m.Groups[node.RepoIndex].Sessions[node.SessionIndex].Expanded = false
+		m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Expanded = false
 		m.Nodes = BuildNodes(m.Groups)
 		m.adjustScroll()
 	}
@@ -817,15 +855,14 @@ func (m Model) handleAddClaude() (tea.Model, tea.Cmd) {
 	var sessionName string
 	switch node.Type {
 	case NodeSession:
-		sessionName = m.Groups[node.RepoIndex].Sessions[node.SessionIndex].Name
+		sessionName = m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Name
 	case NodeWindow:
-		sessionName = m.Groups[node.RepoIndex].Sessions[node.SessionIndex].Name
+		sessionName = m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Name
 	default:
 		return m, nil
 	}
 
-	// Count existing claude windows to generate a unique name
-	session := m.Groups[node.RepoIndex].Sessions[node.SessionIndex]
+	session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
 	claudeCount := 0
 	for _, w := range session.Windows {
 		if strings.HasPrefix(w.Name, "claude") {

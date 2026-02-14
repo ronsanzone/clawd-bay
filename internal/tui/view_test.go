@@ -15,6 +15,7 @@ func TestRenderStatusBadge(t *testing.T) {
 		want   string
 	}{
 		{tmux.StatusWorking, "•"},
+		{tmux.StatusWaiting, "◐"},
 		{tmux.StatusIdle, "◦"},
 		{tmux.StatusDone, "·"},
 	}
@@ -31,16 +32,16 @@ func TestRenderStatusBadge(t *testing.T) {
 
 func TestRenderStatusBar(t *testing.T) {
 	m := Model{
-		Groups: []RepoGroup{
-			{
-				Name: "repo",
+		Groups: []RepoGroup{{
+			Name: "repo",
+			Worktrees: []WorktreeGroup{{
 				Sessions: []WorktreeSession{
 					{Name: "s1", Status: tmux.StatusWorking},
 					{Name: "s2", Status: tmux.StatusIdle},
 					{Name: "s3", Status: tmux.StatusDone},
 				},
-			},
-		},
+			}},
+		}},
 		Styles: NewStyles(KanagawaClaw),
 		Width:  80,
 	}
@@ -61,16 +62,25 @@ func TestBuildDisplayLines(t *testing.T) {
 	m := Model{
 		Groups: []RepoGroup{
 			{
-				Name: "repo-a", Expanded: true,
-				Sessions: []WorktreeSession{
-					{Name: "s1", Expanded: true, Windows: []tmux.Window{{Name: "shell"}}},
-				},
+				Name:     "repo-a",
+				Expanded: true,
+				Worktrees: []WorktreeGroup{{
+					Name:     "(main repo)",
+					Expanded: true,
+					Sessions: []WorktreeSession{{
+						Name:     "s1",
+						Expanded: true,
+						Windows:  []tmux.Window{{Name: "shell"}},
+					}},
+				}},
 			},
 			{
-				Name: "repo-b", Expanded: true,
-				Sessions: []WorktreeSession{
-					{Name: "s2", Expanded: false},
-				},
+				Name:     "repo-b",
+				Expanded: true,
+				Worktrees: []WorktreeGroup{{
+					Name:     "(main repo)",
+					Expanded: false,
+				}},
 			},
 		},
 		Styles:         NewStyles(KanagawaClaw),
@@ -81,28 +91,25 @@ func TestBuildDisplayLines(t *testing.T) {
 	m.Nodes = BuildNodes(m.Groups)
 
 	lines := m.buildDisplayLines(m.Nodes)
-
-	// Expect: repo-a, s1, shell, <blank>, repo-b, s2 = 6 lines
-	if len(lines) != 6 {
-		t.Errorf("got %d display lines, want 6", len(lines))
+	if len(lines) != 7 {
+		t.Fatalf("got %d display lines, want 7", len(lines))
 	}
-
-	// The blank separator between repo groups
-	if len(lines) > 3 && strings.TrimSpace(lines[3]) != "" {
-		t.Errorf("line 3 should be blank separator, got %q", lines[3])
+	if strings.TrimSpace(lines[4]) != "" {
+		t.Fatalf("expected blank separator line before second repo, got %q", lines[4])
 	}
 }
 
 func TestViewContainsFrameElements(t *testing.T) {
 	m := Model{
-		Groups: []RepoGroup{
-			{
-				Name: "repo", Expanded: true,
-				Sessions: []WorktreeSession{
-					{Name: "s1", Expanded: false, Status: tmux.StatusIdle},
-				},
-			},
-		},
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:     "(main repo)",
+				Expanded: true,
+				Sessions: []WorktreeSession{{Name: "s1", Expanded: false, Status: tmux.StatusIdle}},
+			}},
+		}},
 		Styles:         NewStyles(KanagawaClaw),
 		WindowStatuses: make(map[string]tmux.Status),
 		Width:          80,
@@ -112,48 +119,51 @@ func TestViewContainsFrameElements(t *testing.T) {
 	m.Nodes = BuildNodes(m.Groups)
 
 	view := m.View()
-
 	if !strings.Contains(view, "ClawdBay") {
 		t.Error("view missing ClawdBay title")
 	}
-
 	if !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
 		t.Error("view missing rounded border characters")
 	}
-
 	if !strings.Contains(view, "quit") {
 		t.Error("view missing footer keybindings")
 	}
 }
 
-func TestViewEmptyState(t *testing.T) {
-	m := Model{
+func TestViewEmptyStates(t *testing.T) {
+	base := Model{
 		Groups:         []RepoGroup{},
 		Styles:         NewStyles(KanagawaClaw),
 		WindowStatuses: make(map[string]tmux.Status),
 		Width:          80,
 		Height:         24,
 	}
-	m.Nodes = BuildNodes(m.Groups)
 
-	view := m.View()
+	mMissing := base
+	mMissing.ConfigMissing = true
+	mMissing.Nodes = BuildNodes(mMissing.Groups)
+	if view := mMissing.View(); !strings.Contains(view, "No project config found") {
+		t.Fatalf("missing-config view mismatch: %q", view)
+	}
 
-	if !strings.Contains(view, "No active sessions") {
-		t.Error("empty view missing 'No active sessions' message")
+	mEmpty := base
+	mEmpty.Nodes = BuildNodes(mEmpty.Groups)
+	if view := mEmpty.View(); !strings.Contains(view, "No configured projects") {
+		t.Fatalf("empty-config view mismatch: %q", view)
 	}
 }
 
 func TestViewFilterModeHint(t *testing.T) {
 	m := Model{
-		Groups: []RepoGroup{
-			{
-				Name:     "repo",
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:     "(main repo)",
 				Expanded: true,
-				Sessions: []WorktreeSession{
-					{Name: "cb_test", Expanded: true, Windows: []tmux.Window{{Name: "shell"}}},
-				},
-			},
-		},
+				Sessions: []WorktreeSession{{Name: "cb_test", Expanded: true, Windows: []tmux.Window{{Name: "shell"}}}},
+			}},
+		}},
 		FilterMode:     true,
 		FilterQuery:    "missing",
 		FilteredNodes:  []TreeNode{},
@@ -175,21 +185,19 @@ func TestViewFilterModeHint(t *testing.T) {
 
 func TestRenderNodeLineWindowIncludesAgentTag(t *testing.T) {
 	m := Model{
-		Groups: []RepoGroup{
-			{
-				Name:     "repo",
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:     "(main repo)",
 				Expanded: true,
-				Sessions: []WorktreeSession{
-					{
-						Name:     "cb_demo",
-						Expanded: true,
-						Windows: []tmux.Window{
-							{Index: 3, Name: "workbench"},
-						},
-					},
-				},
-			},
-		},
+				Sessions: []WorktreeSession{{
+					Name:     "cb_demo",
+					Expanded: true,
+					Windows:  []tmux.Window{{Index: 3, Name: "workbench"}},
+				}},
+			}},
+		}},
 		WindowStatuses: map[string]tmux.Status{
 			"cb_demo:workbench": tmux.StatusWorking,
 		},
@@ -198,11 +206,11 @@ func TestRenderNodeLineWindowIncludesAgentTag(t *testing.T) {
 		},
 		Styles: NewStyles(KanagawaClaw),
 		Width:  80,
-		Cursor: 2,
+		Cursor: 3,
 	}
 	m.Nodes = BuildNodes(m.Groups)
 
-	line := m.renderNodeLine(m.Nodes[2], 2)
+	line := m.renderNodeLine(m.Nodes[3], 3)
 	if !strings.Contains(line, "[CODEX]") {
 		t.Fatalf("window line missing [CODEX] tag: %q", line)
 	}
@@ -210,24 +218,21 @@ func TestRenderNodeLineWindowIncludesAgentTag(t *testing.T) {
 		t.Fatalf("window line missing status badge: %q", line)
 	}
 }
-
 func TestRenderNodeLineWindowNoAgentTagForNone(t *testing.T) {
 	m := Model{
-		Groups: []RepoGroup{
-			{
-				Name:     "repo",
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:     "(main repo)",
 				Expanded: true,
-				Sessions: []WorktreeSession{
-					{
-						Name:     "cb_demo",
-						Expanded: true,
-						Windows: []tmux.Window{
-							{Index: 1, Name: "shell"},
-						},
-					},
-				},
-			},
-		},
+				Sessions: []WorktreeSession{{
+					Name:     "cb_demo",
+					Expanded: true,
+					Windows:  []tmux.Window{{Index: 1, Name: "shell"}},
+				}},
+			}},
+		}},
 		WindowStatuses: map[string]tmux.Status{
 			"cb_demo:shell": tmux.StatusDone,
 		},
@@ -236,11 +241,11 @@ func TestRenderNodeLineWindowNoAgentTagForNone(t *testing.T) {
 		},
 		Styles: NewStyles(KanagawaClaw),
 		Width:  80,
-		Cursor: 2,
+		Cursor: 3,
 	}
 	m.Nodes = BuildNodes(m.Groups)
 
-	line := m.renderNodeLine(m.Nodes[2], 2)
+	line := m.renderNodeLine(m.Nodes[3], 3)
 	if strings.Contains(line, "[CLAUDE]") || strings.Contains(line, "[CODEX]") || strings.Contains(line, "[OPEN]") {
 		t.Fatalf("window line should not contain agent tag: %q", line)
 	}
