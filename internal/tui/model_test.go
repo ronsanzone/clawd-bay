@@ -508,3 +508,70 @@ func TestFetchGroups_MapsSessionFields(t *testing.T) {
 		t.Fatalf("Status = %q, want %q", session.Status, tmux.StatusWaiting)
 	}
 }
+
+func TestUpdate_EscQuitsOutsideFilterMode(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Worktrees: []WorktreeGroup{
+					{Name: "(main repo)", Expanded: true},
+				},
+			},
+		},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	updatedModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := updatedModel.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd on esc outside filter mode")
+	}
+	if !updated.Quitting {
+		t.Fatal("expected Quitting=true on esc outside filter mode")
+	}
+}
+
+func TestUpdate_EscClearsFilterModeWithoutQuit(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{
+			{
+				Name:     "repo",
+				Expanded: true,
+				Worktrees: []WorktreeGroup{
+					{Name: "(main repo)", Expanded: true},
+				},
+			},
+		},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		FilterMode:     true,
+		FilterQuery:    "repo",
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+	m.FilteredNodes = append([]TreeNode(nil), m.Nodes...)
+
+	updatedModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := updatedModel.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil cmd on esc in filter mode")
+	}
+	if updated.Quitting {
+		t.Fatal("expected Quitting=false on esc in filter mode")
+	}
+	if updated.FilterMode {
+		t.Fatal("expected filter mode to be cleared on esc")
+	}
+	if updated.FilterQuery != "" {
+		t.Fatalf("FilterQuery = %q, want empty", updated.FilterQuery)
+	}
+}

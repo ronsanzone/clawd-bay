@@ -247,25 +247,25 @@ func (m Model) renderFooter() string {
 	}
 
 	if m.Cursor >= len(m.Nodes) {
-		return "/ filter  ·  j/k navigate  ·  m mode  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  m mode  ·  q/esc quit"
 	}
 
 	if m.Mode == DashboardModeAgents {
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  m mode  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  m mode  ·  r refresh  ·  q/esc quit"
 	}
 
 	node := m.Nodes[m.Cursor]
 	switch node.Type {
 	case NodeRepo:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
 	case NodeWorktree:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
 	case NodeSession:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
 	case NodeWindow:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
 	default:
-		return "/ filter  ·  j/k navigate  ·  q quit"
+		return "/ filter  ·  j/k navigate  ·  q/esc quit"
 	}
 }
 

@@ -331,6 +331,9 @@ func TestRenderFooterAgentsMode(t *testing.T) {
 	if !strings.Contains(footer, "m mode") {
 		t.Fatalf("agents footer missing mode toggle: %q", footer)
 	}
+	if !strings.Contains(footer, "q/esc quit") {
+		t.Fatalf("agents footer missing q/esc quit hint: %q", footer)
+	}
 	if strings.Contains(footer, "c claude") {
 		t.Fatalf("agents footer should not contain create key: %q", footer)
 	}
