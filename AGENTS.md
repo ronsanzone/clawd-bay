@@ -69,6 +69,6 @@ This file gives coding agents the minimum high-value context needed to work safe
 - Do not run destructive cleanup commands unless explicitly required for the task.
 
 ## Quick Validation Checklist for Agent Changes
-1. `make test`
+1. `make verify` It's important that this is ran on every change before claiming complete.
 2. If command behavior changed: `make smoke` and check affected command help manually.
 3. If tmux/TUI behavior changed and environment allows: `make test-integration`.

@@ -33,10 +33,7 @@ func (m Model) View() string {
 	}
 
 	fw := m.frameWidth()
-	innerWidth := fw - 2
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	innerWidth := max(fw-2, 10)
 
 	tree := m.renderTree(innerWidth)
 	statusBar := m.renderStatusBar()
@@ -117,10 +114,7 @@ func (m Model) renderAddDialogBox(width int) []string {
 		title = "Add Window"
 	}
 
-	dialogWidth := min(64, max(44, width-8))
-	if dialogWidth > width {
-		dialogWidth = width
-	}
+	dialogWidth := min(min(64, max(44, width-8)), width)
 	if dialogWidth < 28 {
 		dialogWidth = min(width, 28)
 	}
@@ -334,13 +328,13 @@ func (m Model) renderFooter() string {
 	node := m.Nodes[m.Cursor]
 	switch node.Type {
 	case NodeRepo:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  m mode  ·  q/esc quit"
 	case NodeWorktree:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  m mode  ·  q/esc quit"
 	case NodeSession:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  m mode  ·  q/esc quit"
 	case NodeWindow:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  m mode  ·  q/esc quit"
 	default:
 		return "/ filter  ·  j/k navigate  ·  q/esc quit"
 	}
@@ -348,10 +342,7 @@ func (m Model) renderFooter() string {
 
 // renderFrame builds the bordered frame manually.
 func (m Model) renderFrame(tree, statusBar, footer string) string {
-	w := m.frameWidth()
-	if w < 20 {
-		w = 20
-	}
+	w := max(m.frameWidth(), 20)
 
 	border := lipgloss.RoundedBorder()
 	bStyle := lipgloss.NewStyle().Foreground(m.Styles.Frame.GetBorderTopForeground())
@@ -379,7 +370,7 @@ func (m Model) renderFrame(tree, statusBar, footer string) string {
 	var lines []string
 	lines = append(lines, topLine)
 
-	for _, cl := range strings.Split(tree, "\n") {
+	for cl := range strings.SplitSeq(tree, "\n") {
 		lines = append(lines, side+padToWidth(cl, w-2)+sideR)
 	}
 

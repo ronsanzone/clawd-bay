@@ -730,8 +730,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.openAddDialogForNode(m.Nodes[m.Cursor])
-		case "r":
-			return m, m.refreshCmd()
 		case "/":
 			m.FilterMode = true
 			m.FilterQuery = ""
