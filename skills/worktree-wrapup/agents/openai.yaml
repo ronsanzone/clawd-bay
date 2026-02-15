@@ -1,3 +1,0 @@
-interface:
-  display_name: "Worktree Wrap-Up"
-  short_description: "Finalize a worktree with logical commits, merge, and cleanup"

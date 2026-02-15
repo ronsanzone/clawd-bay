@@ -1,4 +1,0 @@
-interface:
-  display_name: "Commit"
-  short_description: "Plan and create logical commits with Codex co-author attribution"
-  default_prompt: "Commit the current repository changes: check state, propose logical commit groupings, and create one or more commits with Codex co-author attribution."
