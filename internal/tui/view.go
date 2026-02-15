@@ -84,7 +84,84 @@ func (m Model) renderTree(width int) string {
 		result = append(result, strings.Repeat(" ", width))
 	}
 
+	if m.AddDialog.Active {
+		result = m.overlayAddDialog(result, width)
+	}
+
 	return strings.Join(result, "\n")
+}
+
+func (m Model) overlayAddDialog(lines []string, width int) []string {
+	popup := m.renderAddDialogBox(width)
+	if len(popup) == 0 || len(lines) == 0 {
+		return lines
+	}
+
+	startY := max(0, (len(lines)-len(popup))/2)
+	for i, line := range popup {
+		y := startY + i
+		if y >= len(lines) {
+			break
+		}
+		leftPad := max(0, (width-lipgloss.Width(line))/2)
+		merged := strings.Repeat(" ", leftPad) + line
+		lines[y] = fitAndPad(merged, width)
+	}
+	return lines
+}
+
+func (m Model) renderAddDialogBox(width int) []string {
+	title := "Add Session"
+	target := m.addDialogTarget()
+	if m.AddDialog.Kind == AddKindWindow {
+		title = "Add Window"
+	}
+
+	dialogWidth := min(64, max(44, width-8))
+	if dialogWidth > width {
+		dialogWidth = width
+	}
+	if dialogWidth < 28 {
+		dialogWidth = min(width, 28)
+	}
+	if dialogWidth < 4 {
+		return nil
+	}
+
+	inner := dialogWidth - 2
+	rows := []string{
+		fitAndPad(title, inner),
+		fitAndPad("target: "+target, inner),
+		fitAndPad("name: "+m.AddDialog.Input, inner),
+		fitAndPad("enter create  esc cancel", inner),
+	}
+	if m.AddDialog.Error != "" {
+		rows = append(rows, fitAndPad("error: "+m.AddDialog.Error, inner))
+	}
+
+	popup := make([]string, 0, len(rows)+2)
+	popup = append(popup, "╭"+strings.Repeat("─", inner)+"╮")
+	for _, row := range rows {
+		popup = append(popup, "│"+row+"│")
+	}
+	popup = append(popup, "╰"+strings.Repeat("─", inner)+"╯")
+
+	return popup
+}
+
+func (m Model) addDialogTarget() string {
+	switch m.AddDialog.Kind {
+	case AddKindSession:
+		if m.AddDialog.RepoIndex >= 0 && m.AddDialog.RepoIndex < len(m.Groups) {
+			group := m.Groups[m.AddDialog.RepoIndex]
+			if m.AddDialog.WorktreeIdx >= 0 && m.AddDialog.WorktreeIdx < len(group.Worktrees) {
+				return group.Worktrees[m.AddDialog.WorktreeIdx].Path
+			}
+		}
+	case AddKindWindow:
+		return m.AddDialog.SessionName
+	}
+	return ""
 }
 
 // buildDisplayLines renders all tree nodes to display lines.
@@ -257,13 +334,13 @@ func (m Model) renderFooter() string {
 	node := m.Nodes[m.Cursor]
 	switch node.Type {
 	case NodeRepo:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
 	case NodeWorktree:
-		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter toggle  ·  a add session  ·  h/l collapse/expand  ·  m mode  ·  q/esc quit"
 	case NodeSession:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
 	case NodeWindow:
-		return "/ filter  ·  j/k navigate  ·  enter attach  ·  c claude  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
+		return "/ filter  ·  j/k navigate  ·  enter attach  ·  a add window  ·  h collapse  ·  m mode  ·  r refresh  ·  q/esc quit"
 	default:
 		return "/ filter  ·  j/k navigate  ·  q/esc quit"
 	}
@@ -320,4 +397,15 @@ func padToWidth(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-w)
+}
+
+func fitAndPad(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	for lipgloss.Width(string(runes)) > width && len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+	}
+	return padToWidth(string(runes), width)
 }

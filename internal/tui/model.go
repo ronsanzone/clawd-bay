@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rsanzone/clawdbay/internal/config"
 	"github.com/rsanzone/clawdbay/internal/discovery"
 	"github.com/rsanzone/clawdbay/internal/tmux"
 )
@@ -26,9 +28,32 @@ type refreshMsg struct {
 	Err            error
 }
 
-// claudeWindowMsg is sent after attempting to create a Claude window.
-type claudeWindowMsg struct {
-	Err error
+// AddKind identifies which add flow is active.
+type AddKind int
+
+const (
+	AddKindNone AddKind = iota
+	AddKindSession
+	AddKindWindow
+)
+
+// AddDialogState stores state for the add name dialog.
+type AddDialogState struct {
+	Active      bool
+	Kind        AddKind
+	Input       string
+	Error       string
+	RepoIndex   int
+	WorktreeIdx int
+	SessionName string
+}
+
+// addResultMsg is sent after attempting to create a session or window.
+type addResultMsg struct {
+	Kind   AddKind
+	Name   string
+	Target string
+	Err    error
 }
 
 // NodeType represents what kind of tree node the cursor is on.
@@ -146,6 +171,7 @@ type Model struct {
 	Styles              Styles
 	StatusMsg           string
 	ConfigMissing       bool
+	AddDialog           AddDialogState
 }
 
 // RollupStatus returns the most active status from a slice.
@@ -578,11 +604,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustScroll()
 		return m, nil
 
-	case claudeWindowMsg:
+	case addResultMsg:
 		if msg.Err != nil {
 			m.StatusMsg = fmt.Sprintf("Error: %v", msg.Err)
 		} else {
-			m.StatusMsg = "Claude window created"
+			switch msg.Kind {
+			case AddKindSession:
+				m.StatusMsg = fmt.Sprintf("Session created: %s", msg.Name)
+			case AddKindWindow:
+				m.StatusMsg = fmt.Sprintf("Window created: %s", msg.Name)
+			default:
+				m.StatusMsg = "Created"
+			}
 		}
 		return m, m.refreshCmd()
 
@@ -596,6 +629,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.AddDialog.Active {
+			switch msg.String() {
+			case "esc":
+				m.AddDialog = AddDialogState{}
+				return m, nil
+			case "backspace", "ctrl+h":
+				if m.AddDialog.Input != "" {
+					runes := []rune(m.AddDialog.Input)
+					m.AddDialog.Input = string(runes[:len(runes)-1])
+					m.AddDialog.Error = ""
+				}
+				return m, nil
+			case "enter":
+				return m.submitAddDialog()
+			}
+
+			if len(msg.Runes) > 0 {
+				m.AddDialog.Input += string(msg.Runes)
+				m.AddDialog.Error = ""
+			}
+			return m, nil
+		}
+
 		if m.FilterMode {
 			switch msg.String() {
 			case "esc":
@@ -666,11 +722,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.handleCollapse()
-		case "c":
+		case "a":
 			if m.Mode == DashboardModeAgents {
 				return m, nil
 			}
-			return m.handleAddClaude()
+			if m.Cursor >= len(m.Nodes) {
+				return m, nil
+			}
+			return m.openAddDialogForNode(m.Nodes[m.Cursor])
 		case "r":
 			return m, m.refreshCmd()
 		case "/":
@@ -701,6 +760,7 @@ func (m *Model) toggleMode() {
 	m.FilterQuery = ""
 	m.FilteredNodes = nil
 	m.FilteredCursor = 0
+	m.AddDialog = AddDialogState{}
 }
 
 // mergeExpandState preserves expand/collapse state across refreshes.
@@ -844,41 +904,211 @@ func (m Model) handleCollapse() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleAddClaude creates a new Claude window in the session under the cursor.
-// Works when the cursor is on a session or window node.
-func (m Model) handleAddClaude() (tea.Model, tea.Cmd) {
-	if m.Cursor >= len(m.Nodes) {
-		return m, nil
-	}
-	node := m.Nodes[m.Cursor]
-
-	var sessionName string
+func (m Model) openAddDialogForNode(node TreeNode) (Model, tea.Cmd) {
 	switch node.Type {
-	case NodeSession:
-		sessionName = m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Name
-	case NodeWindow:
-		sessionName = m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex].Name
+	case NodeRepo:
+		if node.RepoIndex < 0 || node.RepoIndex >= len(m.Groups) {
+			return m, nil
+		}
+		group := m.Groups[node.RepoIndex]
+		mainIdx := -1
+		for i, wt := range group.Worktrees {
+			if wt.IsMainRepo {
+				mainIdx = i
+				break
+			}
+		}
+		if mainIdx == -1 {
+			m.StatusMsg = fmt.Sprintf("Error: main worktree not found for %s", group.Name)
+			return m, nil
+		}
+		m.AddDialog = AddDialogState{
+			Active:      true,
+			Kind:        AddKindSession,
+			RepoIndex:   node.RepoIndex,
+			WorktreeIdx: mainIdx,
+		}
+		return m, nil
+	case NodeWorktree:
+		if node.RepoIndex < 0 || node.RepoIndex >= len(m.Groups) {
+			return m, nil
+		}
+		if node.WorktreeIndex < 0 || node.WorktreeIndex >= len(m.Groups[node.RepoIndex].Worktrees) {
+			return m, nil
+		}
+		m.AddDialog = AddDialogState{
+			Active:      true,
+			Kind:        AddKindSession,
+			RepoIndex:   node.RepoIndex,
+			WorktreeIdx: node.WorktreeIndex,
+		}
+		return m, nil
+	case NodeSession, NodeWindow:
+		if node.RepoIndex < 0 || node.RepoIndex >= len(m.Groups) {
+			return m, nil
+		}
+		if node.WorktreeIndex < 0 || node.WorktreeIndex >= len(m.Groups[node.RepoIndex].Worktrees) {
+			return m, nil
+		}
+		worktree := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex]
+		if node.SessionIndex < 0 || node.SessionIndex >= len(worktree.Sessions) {
+			return m, nil
+		}
+		sessionName := worktree.Sessions[node.SessionIndex].Name
+		m.AddDialog = AddDialogState{
+			Active:      true,
+			Kind:        AddKindWindow,
+			RepoIndex:   node.RepoIndex,
+			WorktreeIdx: node.WorktreeIndex,
+			SessionName: sessionName,
+		}
+		return m, nil
 	default:
 		return m, nil
 	}
+}
 
-	session := m.Groups[node.RepoIndex].Worktrees[node.WorktreeIndex].Sessions[node.SessionIndex]
-	claudeCount := 0
-	for _, w := range session.Windows {
-		if strings.HasPrefix(w.Name, "claude") {
-			claudeCount++
+func (m Model) submitAddDialog() (tea.Model, tea.Cmd) {
+	dialog := m.AddDialog
+	rawName := dialog.Input
+	sanitized := sanitizeAddName(rawName)
+	if sanitized == "" {
+		m.AddDialog.Error = "name is required"
+		return m, nil
+	}
+
+	client := m.TmuxClient
+	if client == nil {
+		m.AddDialog.Error = "tmux client is not available"
+		return m, nil
+	}
+
+	switch dialog.Kind {
+	case AddKindSession:
+		if dialog.RepoIndex < 0 || dialog.RepoIndex >= len(m.Groups) {
+			m.AddDialog.Error = "target repo no longer exists"
+			return m, nil
+		}
+		group := m.Groups[dialog.RepoIndex]
+		if dialog.WorktreeIdx < 0 || dialog.WorktreeIdx >= len(group.Worktrees) {
+			m.AddDialog.Error = "target worktree no longer exists"
+			return m, nil
+		}
+		worktreePath := group.Worktrees[dialog.WorktreeIdx].Path
+		candidate := ensureSessionPrefix(sanitized)
+		if candidate == "cb_" {
+			m.AddDialog.Error = "name is required"
+			return m, nil
+		}
+
+		m.AddDialog = AddDialogState{}
+		m.StatusMsg = fmt.Sprintf("Creating session %s...", candidate)
+		return m, func() tea.Msg {
+			sessions, err := client.ListSessions()
+			if err != nil {
+				return addResultMsg{Kind: AddKindSession, Err: err}
+			}
+
+			existing := make(map[string]struct{}, len(sessions))
+			for _, s := range sessions {
+				existing[s.Name] = struct{}{}
+			}
+			finalName := uniquifyName(candidate, func(name string) bool {
+				_, ok := existing[name]
+				return ok
+			})
+
+			if err := client.CreateSession(finalName, worktreePath); err != nil {
+				return addResultMsg{Kind: AddKindSession, Name: finalName, Target: worktreePath, Err: err}
+			}
+
+			canonicalPath, err := config.CanonicalPath(worktreePath)
+			if err != nil {
+				return addResultMsg{Kind: AddKindSession, Name: finalName, Target: worktreePath, Err: err}
+			}
+			if err := client.SetSessionOption(finalName, tmux.SessionOptionHomePath, canonicalPath); err != nil {
+				return addResultMsg{Kind: AddKindSession, Name: finalName, Target: worktreePath, Err: err}
+			}
+
+			return addResultMsg{Kind: AddKindSession, Name: finalName, Target: worktreePath}
+		}
+	case AddKindWindow:
+		sessionName := dialog.SessionName
+		if sessionName == "" {
+			m.AddDialog.Error = "target session no longer exists"
+			return m, nil
+		}
+
+		// Best effort dedupe from the current model snapshot.
+		existing := make(map[string]struct{})
+		if dialog.RepoIndex >= 0 && dialog.RepoIndex < len(m.Groups) &&
+			dialog.WorktreeIdx >= 0 && dialog.WorktreeIdx < len(m.Groups[dialog.RepoIndex].Worktrees) {
+			worktree := m.Groups[dialog.RepoIndex].Worktrees[dialog.WorktreeIdx]
+			for _, session := range worktree.Sessions {
+				if session.Name != sessionName {
+					continue
+				}
+				for _, w := range session.Windows {
+					existing[w.Name] = struct{}{}
+				}
+				break
+			}
+		}
+		windowName := uniquifyName(sanitized, func(name string) bool {
+			_, ok := existing[name]
+			return ok
+		})
+
+		m.AddDialog = AddDialogState{}
+		m.StatusMsg = fmt.Sprintf("Creating window %s...", windowName)
+		return m, func() tea.Msg {
+			err := client.CreateWindow(sessionName, windowName, "")
+			return addResultMsg{
+				Kind:   AddKindWindow,
+				Name:   windowName,
+				Target: sessionName,
+				Err:    err,
+			}
+		}
+	default:
+		m.AddDialog.Error = "invalid add action"
+		return m, nil
+	}
+}
+
+func sanitizeAddName(raw string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(raw)) {
+		switch {
+		case unicode.IsSpace(r):
+			b.WriteRune('-')
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '/':
+			b.WriteRune(r)
 		}
 	}
 
-	windowName := "claude"
-	if claudeCount > 0 {
-		windowName = fmt.Sprintf("claude:%d", claudeCount+1)
+	sanitized := b.String()
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
 	}
+	return strings.Trim(sanitized, "-/")
+}
 
-	m.StatusMsg = fmt.Sprintf("Creating %s in %s...", windowName, sessionName)
-	client := m.TmuxClient
-	return m, func() tea.Msg {
-		err := client.CreateWindowWithShell(sessionName, windowName, "claude")
-		return claudeWindowMsg{Err: err}
+func ensureSessionPrefix(name string) string {
+	if strings.HasPrefix(name, "cb_") {
+		return name
+	}
+	return "cb_" + name
+}
+
+func uniquifyName(base string, exists func(string) bool) string {
+	if !exists(base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !exists(candidate) {
+			return candidate
+		}
 	}
 }

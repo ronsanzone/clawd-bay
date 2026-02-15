@@ -338,3 +338,91 @@ func TestRenderFooterAgentsMode(t *testing.T) {
 		t.Fatalf("agents footer should not contain create key: %q", footer)
 	}
 }
+
+func TestRenderFooterWorktreeAddHints(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:       "(main repo)",
+				Path:       "/tmp/repo",
+				IsMainRepo: true,
+				Expanded:   true,
+				Sessions: []WorktreeSession{{
+					Name:     "cb_demo",
+					Expanded: true,
+					Windows:  []tmux.Window{{Index: 0, Name: "shell"}},
+				}},
+			}},
+		}},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	tests := []struct {
+		name     string
+		cursor   int
+		contains string
+	}{
+		{name: "repo footer", cursor: 0, contains: "a add session"},
+		{name: "worktree footer", cursor: 1, contains: "a add session"},
+		{name: "session footer", cursor: 2, contains: "a add window"},
+		{name: "window footer", cursor: 3, contains: "a add window"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m.Cursor = tt.cursor
+			footer := m.renderFooter()
+			if !strings.Contains(footer, tt.contains) {
+				t.Fatalf("footer = %q, want to contain %q", footer, tt.contains)
+			}
+			if strings.Contains(footer, "c claude") {
+				t.Fatalf("footer should not contain legacy shortcut: %q", footer)
+			}
+		})
+	}
+}
+
+func TestViewRendersAddDialogPopup(t *testing.T) {
+	m := Model{
+		Groups: []RepoGroup{{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{{
+				Name:       "(main repo)",
+				Path:       "/tmp/repo",
+				IsMainRepo: true,
+				Expanded:   true,
+				Sessions:   []WorktreeSession{},
+			}},
+		}},
+		AddDialog: AddDialogState{
+			Active:      true,
+			Kind:        AddKindSession,
+			RepoIndex:   0,
+			WorktreeIdx: 0,
+			Input:       "demo",
+		},
+		Styles:         NewStyles(KanagawaClaw),
+		WindowStatuses: make(map[string]tmux.Status),
+		Width:          80,
+		Height:         24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+
+	view := m.View()
+	if !strings.Contains(view, "Add Session") {
+		t.Fatalf("view missing dialog title: %q", view)
+	}
+	if !strings.Contains(view, "name: demo") {
+		t.Fatalf("view missing dialog input: %q", view)
+	}
+	if !strings.Contains(view, "enter create  esc cancel") {
+		t.Fatalf("view missing dialog hint: %q", view)
+	}
+}

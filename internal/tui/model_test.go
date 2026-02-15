@@ -463,13 +463,220 @@ func TestAgentsModeIgnoresTreeAndCreateKeys(t *testing.T) {
 		t.Fatalf("nodes changed unexpectedly: %+v", m.Nodes)
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	m = updated.(Model)
 	if cmd != nil {
-		t.Fatal("expected nil cmd for add-claude in agents mode")
+		t.Fatal("expected nil cmd for add in agents mode")
 	}
 	if m.StatusMsg != "" {
 		t.Fatalf("StatusMsg should remain empty, got %q", m.StatusMsg)
+	}
+}
+
+func TestOpenAddDialogForNodeTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		selectNode  func([]TreeNode) int
+		wantKind    AddKind
+		wantSession string
+		wantWT      int
+	}{
+		{
+			name: "repo opens main-worktree session dialog",
+			selectNode: func(nodes []TreeNode) int {
+				for i, n := range nodes {
+					if n.Type == NodeRepo {
+						return i
+					}
+				}
+				return -1
+			},
+			wantKind: AddKindSession,
+			wantWT:   0,
+		},
+		{
+			name: "worktree opens session dialog for selected worktree",
+			selectNode: func(nodes []TreeNode) int {
+				for i, n := range nodes {
+					if n.Type == NodeWorktree && n.WorktreeIndex == 1 {
+						return i
+					}
+				}
+				return -1
+			},
+			wantKind: AddKindSession,
+			wantWT:   1,
+		},
+		{
+			name: "session opens window dialog",
+			selectNode: func(nodes []TreeNode) int {
+				for i, n := range nodes {
+					if n.Type == NodeSession && n.WorktreeIndex == 1 {
+						return i
+					}
+				}
+				return -1
+			},
+			wantKind:    AddKindWindow,
+			wantSession: "cb_feat",
+		},
+		{
+			name: "window opens parent session window dialog",
+			selectNode: func(nodes []TreeNode) int {
+				for i, n := range nodes {
+					if n.Type == NodeWindow && n.WorktreeIndex == 0 {
+						return i
+					}
+				}
+				return -1
+			},
+			wantKind:    AddKindWindow,
+			wantSession: "cb_main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := addDialogTestModel()
+			idx := tt.selectNode(m.Nodes)
+			if idx < 0 {
+				t.Fatal("test node not found")
+			}
+			m.Cursor = idx
+
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+			got := updated.(Model)
+			if cmd != nil {
+				t.Fatal("expected nil command when opening add dialog")
+			}
+			if !got.AddDialog.Active {
+				t.Fatal("expected active add dialog")
+			}
+			if got.AddDialog.Kind != tt.wantKind {
+				t.Fatalf("AddDialog.Kind = %v, want %v", got.AddDialog.Kind, tt.wantKind)
+			}
+			if tt.wantSession != "" && got.AddDialog.SessionName != tt.wantSession {
+				t.Fatalf("AddDialog.SessionName = %q, want %q", got.AddDialog.SessionName, tt.wantSession)
+			}
+			if tt.wantKind == AddKindSession && got.AddDialog.WorktreeIdx != tt.wantWT {
+				t.Fatalf("AddDialog.WorktreeIdx = %d, want %d", got.AddDialog.WorktreeIdx, tt.wantWT)
+			}
+		})
+	}
+}
+
+func TestAddDialogInputHandling(t *testing.T) {
+	m := addDialogTestModel()
+	m.AddDialog = AddDialogState{
+		Active:      true,
+		Kind:        AddKindSession,
+		RepoIndex:   0,
+		WorktreeIdx: 0,
+		Input:       "ab",
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(Model)
+	if m.AddDialog.Input != "abc" {
+		t.Fatalf("input after rune = %q, want %q", m.AddDialog.Input, "abc")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(Model)
+	if m.AddDialog.Input != "ab" {
+		t.Fatalf("input after backspace = %q, want %q", m.AddDialog.Input, "ab")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.AddDialog.Active {
+		t.Fatal("dialog should be inactive after esc")
+	}
+}
+
+func TestSubmitAddDialogEmptySanitizedInputShowsError(t *testing.T) {
+	m := addDialogTestModel()
+	m.AddDialog = AddDialogState{
+		Active:      true,
+		Kind:        AddKindWindow,
+		SessionName: "cb_main",
+		Input:       "!!!",
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected nil command on validation failure")
+	}
+	if !got.AddDialog.Active {
+		t.Fatal("dialog should remain open on validation failure")
+	}
+	if got.AddDialog.Error == "" {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestSanitizeAddName(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "lower and trim", raw: " Feature Branch ", want: "feature-branch"},
+		{name: "keep slash and underscore", raw: "API_v2/Review", want: "api_v2/review"},
+		{name: "collapse dashes", raw: "alpha   beta---gamma", want: "alpha-beta-gamma"},
+		{name: "trim edge separators", raw: "/demo-path/-", want: "demo-path"},
+		{name: "drop invalid", raw: "###", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeAddName(tt.raw); got != tt.want {
+				t.Fatalf("sanitizeAddName(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureSessionPrefix(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "cb_demo", want: "cb_demo"},
+		{in: "demo", want: "cb_demo"},
+		{in: "", want: "cb_"},
+	}
+
+	for _, tt := range tests {
+		if got := ensureSessionPrefix(tt.in); got != tt.want {
+			t.Fatalf("ensureSessionPrefix(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestUniquifyName(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     string
+		existing map[string]struct{}
+		want     string
+	}{
+		{name: "unused base", base: "demo", existing: map[string]struct{}{}, want: "demo"},
+		{name: "first suffix", base: "demo", existing: map[string]struct{}{"demo": {}}, want: "demo-2"},
+		{name: "next suffix", base: "demo", existing: map[string]struct{}{"demo": {}, "demo-2": {}}, want: "demo-3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := uniquifyName(tt.base, func(name string) bool {
+				_, ok := tt.existing[name]
+				return ok
+			})
+			if got != tt.want {
+				t.Fatalf("uniquifyName(%q) = %q, want %q", tt.base, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -574,4 +781,52 @@ func TestUpdate_EscClearsFilterModeWithoutQuit(t *testing.T) {
 	if updated.FilterQuery != "" {
 		t.Fatalf("FilterQuery = %q, want empty", updated.FilterQuery)
 	}
+}
+
+func addDialogTestModel() Model {
+	groups := []RepoGroup{
+		{
+			Name:     "repo",
+			Expanded: true,
+			Worktrees: []WorktreeGroup{
+				{
+					Name:       "(main repo)",
+					Path:       "/tmp/repo",
+					IsMainRepo: true,
+					Expanded:   true,
+					Sessions: []WorktreeSession{
+						{
+							Name:     "cb_main",
+							Expanded: true,
+							Windows:  []tmux.Window{{Index: 0, Name: "shell"}},
+						},
+					},
+				},
+				{
+					Name:       ".worktrees/repo-feat",
+					Path:       "/tmp/repo/.worktrees/repo-feat",
+					IsMainRepo: false,
+					Expanded:   true,
+					Sessions: []WorktreeSession{
+						{
+							Name:     "cb_feat",
+							Expanded: true,
+							Windows:  []tmux.Window{{Index: 1, Name: "work"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	m := Model{
+		Groups:           groups,
+		Styles:           NewStyles(KanagawaClaw),
+		WindowStatuses:   make(map[string]tmux.Status),
+		WindowAgentTypes: make(map[string]tmux.AgentType),
+		Width:            80,
+		Height:           24,
+	}
+	m.Nodes = BuildNodes(m.Groups)
+	return m
 }
