@@ -132,12 +132,12 @@ type sessionOptionSetter interface {
 func persistSessionHomePath(tmuxClient sessionOptionSetter, sessionName, worktreeDir string, errWriter io.Writer) {
 	canonicalHomePath, err := config.CanonicalPath(worktreeDir)
 	if err != nil {
-		fmt.Fprintf(errWriter, "Warning: failed to canonicalize session home path for %s: %v\n", sessionName, err)
+		_, _ = fmt.Fprintf(errWriter, "Warning: failed to canonicalize session home path for %s: %v\n", sessionName, err)
 		return
 	}
 
 	if err := tmuxClient.SetSessionOption(sessionName, tmux.SessionOptionHomePath, canonicalHomePath); err != nil {
-		fmt.Fprintf(errWriter, "Warning: failed to set tmux session home metadata for %s: %v\n", sessionName, err)
+		_, _ = fmt.Fprintf(errWriter, "Warning: failed to set tmux session home metadata for %s: %v\n", sessionName, err)
 	}
 }
 
@@ -185,7 +185,7 @@ func warnIfRepoNotConfigured(repoPath string) error {
 		}
 	}
 
-	fmt.Fprintln(startErrWriter, "Warning: current repo is not configured; sessions started here will not appear in `cb dash` or `cb list`.")
+	_, _ = fmt.Fprintln(startErrWriter, "Warning: current repo is not configured; sessions started here will not appear in `cb dash` or `cb list`.")
 	return nil
 }
 
