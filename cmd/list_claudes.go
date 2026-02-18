@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ func (l listClaudesOut) toString() string {
 
 var listClaudesCmd = &cobra.Command{
 	Use:   "clist",
-	Short: "List all active Claude Code sessions",
+	Short: "List tmux windows and detected coding agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tmuxClient := tmux.NewClient()
 		rows, err := tmuxClient.ListSessionWindowInfo()

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 )
 
 type fakeSessionResolver struct {

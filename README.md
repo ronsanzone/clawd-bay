@@ -1,13 +1,31 @@
 # ClawdBay
 
-A CLI + TUI tool for managing multi-session coding-agent workflows across git worktrees and tmux sessions.
+![Go 1.25.7+](https://img.shields.io/badge/Go-1.25.7%2B-00ADD8?logo=go)
+![tmux 3.x+](https://img.shields.io/badge/tmux-3.x%2B-1BB91F?logo=tmux)
+![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![CI](https://github.com/ronsanzone/clawd-bay/actions/workflows/ci.yml/badge.svg)
+
+Run multiple coding-agent workflows in parallel without losing context.
+
+ClawdBay combines git worktrees, tmux sessions, and a fast terminal dashboard so each task stays isolated, observable, and easy to switch into.
+You run your preferred coding agent CLI in tmux panes; ClawdBay focuses on monitoring and fast session/window switching.
+
+## Why ClawdBay
+
+- Keep each task isolated with `cb start <branch>` in its own worktree and `cb_<branch>` tmux session.
+- Monitor and jump to the exact session/window from `cb dash` using status-aware navigation.
+- Stay stateless: workflow state is derived directly from tmux, not a background database.
+
 
 ## Quick Start
 
-**Prerequisites:** Go 1.25.7+, tmux 3.x+, and at least one coding agent CLI (`claude`, `codex`, or `open-code`) on your PATH.
+**Prerequisites:** Go 1.25.7+, tmux 3.x+, and any coding agent CLI(s) you plan to run in tmux panes (for example `claude`, `codex`, or `open-code`).
 
 ```bash
 # Install latest published version
+go install github.com/ronsanzone/clawd-bay@latest
+
+# Or via Makefile wrapper
 make install
 
 # Or build from this checkout
@@ -20,9 +38,6 @@ cb project add /absolute/path/to/repo-a --name repo-a
 cd /absolute/path/to/repo-a
 cb start feat-auth
 
-# Add another agent window
-cb claude --name review
-
 # Open dashboard
 cb dash
 cb dash --mode agents
@@ -33,7 +48,6 @@ cb dash --mode agents
 | Command | Description |
 |---------|-------------|
 | `cb start <branch>` | Create `.worktrees/<repo>-<branch>` + tmux session `cb_<branch>` |
-| `cb claude` | Add a Claude window to the matching `cb_` session |
 | `cb dash` / `cb` | Interactive dashboard (project-scoped) |
 | `cb dash --mode agents` | Dashboard listing detected agent windows across all tmux sessions |
 | `cb list` | Non-interactive project/worktree/session tree (project-scoped) |
@@ -63,3 +77,4 @@ Notes:
 ## Documentation
 
 - [Installation & Command Reference](INSTALL.md)
+- [README Media Workflow](docs/media/README.md)

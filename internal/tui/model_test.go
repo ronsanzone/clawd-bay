@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rsanzone/clawdbay/internal/discovery"
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/discovery"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 )
 
 type stubDiscoverer struct {

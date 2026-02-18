@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rsanzone/clawdbay/internal/config"
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/config"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 )
 
 type fakeTmux struct {

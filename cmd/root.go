@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/rsanzone/clawdbay/internal/logging"
+	"github.com/ronsanzone/clawd-bay/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -16,12 +16,12 @@ var debug bool
 
 var rootCmd = &cobra.Command{
 	Use:     "cb",
-	Short:   "ClawdBay - A harbor for your Claude sessions",
+	Short:   "ClawdBay - A harbor for your coding-agent sessions",
 	Version: Version,
-	Long: `ClawdBay manages multi-session Claude Code workflows.
+	Long: `ClawdBay helps you manage and switch between coding-agent sessions in tmux.
 
-Start workflows with git worktrees, manage multiple Claude sessions
-per worktree, and track session status from an interactive dashboard.`,
+Create isolated git worktree workflows and track session status
+from an interactive dashboard.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		logging.Setup(debug)
 		slog.Debug("cb starting", "command", cmd.Name(), "debug", debug)

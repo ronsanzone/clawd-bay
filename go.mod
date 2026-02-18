@@ -1,4 +1,4 @@
-module github.com/rsanzone/clawdbay
+module github.com/ronsanzone/clawd-bay
 
 go 1.25.7
 

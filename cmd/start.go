@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rsanzone/clawdbay/internal/config"
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/config"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -106,11 +106,6 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
 	persistSessionHomePath(tmuxClient, sessionName, worktreeDir, startErrWriter)
-
-	// Create Claude window
-	if err := tmuxClient.CreateWindowWithShellInDir(sessionName, "claude", "claude", worktreeDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to create Claude window: %v\n", err)
-	}
 
 	// If detach mode, just print instructions and exit
 	if startDetach {

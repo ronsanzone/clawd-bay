@@ -1,6 +1,6 @@
 .PHONY: build test test-integration lint verify install install-local clean run debug smoke
 
-MODULE := github.com/rsanzone/clawdbay
+MODULE := github.com/ronsanzone/clawd-bay
 
 build:
 	go build -o cb main.go

@@ -5,8 +5,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rsanzone/clawdbay/internal/tmux"
-	"github.com/rsanzone/clawdbay/internal/tui"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/tui"
 	"github.com/spf13/cobra"
 )
 

@@ -5,13 +5,13 @@ This file gives coding agents the minimum high-value context needed to work safe
 
 ## Project Overview
 - ClawdBay is a Go CLI/TUI for managing multi-session coding-agent workflows in tmux.
-- Core flow: create worktree + tmux session (`cb start`), add agent windows (`cb claude`), monitor/attach (`cb` or `cb dash`), cleanup (`cb archive`).
-- Runtime dependencies: Go 1.25.7, tmux 3.x+, and a coding agent CLI (`claude`, `codex`, `open-code`) available in tmux panes.
+- Core flow: create worktree + tmux session (`cb start`), monitor/attach (`cb` or `cb dash`), cleanup (`cb archive`).
+- Runtime dependencies: Go 1.25.7, tmux 3.x+, and a coding agent CLI (`claude`, `codex`, `open-code`) for agent-driven pane workflows.
 - The system is stateless by design: session/workflow state is derived from tmux at runtime.
 
 ## Repository Map
 - `/main.go`: program entrypoint.
-- `/cmd`: Cobra command layer (`start`, `claude`, `dash`, `list`, `archive`, `clist`, resolver helpers).
+- `/cmd`: Cobra command layer (`start`, `dash`, `list`, `archive`, `clist`, resolver helpers).
 - `/internal/tmux`: tmux command client, session/window parsing, agent/status detection.
 - `/internal/tui`: Bubble Tea model/view/theme for dashboard UX.
 - `/internal/config`: config path management.
@@ -21,7 +21,7 @@ This file gives coding agents the minimum high-value context needed to work safe
 
 ## Source-of-Truth Rules
 - Trust code and tests first.
-- Current command surface from source: `cb start`, `cb claude`, `cb dash` (default `cb`), `cb list`, `cb archive`, `cb clist`.
+- Current command surface from source: `cb start`, `cb dash` (default `cb`), `cb list`, `cb archive`, `cb clist`.
 
 ## Critical Invariants
 - Tmux session names for managed workflows must be prefixed with `cb_`.

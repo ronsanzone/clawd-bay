@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 )
 
 func TestRenderStatusBadge(t *testing.T) {

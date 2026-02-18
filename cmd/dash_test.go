@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rsanzone/clawdbay/internal/tui"
+	"github.com/ronsanzone/clawd-bay/internal/tui"
 )
 
 type fakeDashTmuxClient struct {

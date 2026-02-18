@@ -1,6 +1,6 @@
 package main
 
-import "github.com/rsanzone/clawdbay/cmd"
+import "github.com/ronsanzone/clawd-bay/cmd"
 
 func main() {
 	cmd.Execute()

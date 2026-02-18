@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rsanzone/clawdbay/internal/config"
+	"github.com/ronsanzone/clawd-bay/internal/config"
 	"github.com/spf13/cobra"
 )
 

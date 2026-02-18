@@ -8,9 +8,9 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rsanzone/clawdbay/internal/config"
-	"github.com/rsanzone/clawdbay/internal/discovery"
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/config"
+	"github.com/ronsanzone/clawd-bay/internal/discovery"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 )
 
 const refreshInterval = 3 * time.Second

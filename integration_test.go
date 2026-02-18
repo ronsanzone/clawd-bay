@@ -31,7 +31,7 @@ func TestCLI_Help(t *testing.T) {
 		t.Fatalf("help command failed: %v", err)
 	}
 
-	expected := []string{"start", "claude", "list", "archive", "dash", "project"}
+	expected := []string{"start", "list", "archive", "dash", "project"}
 	for _, sub := range expected {
 		if !strings.Contains(string(output), sub) {
 			t.Errorf("help missing subcommand: %s", sub)
@@ -111,15 +111,15 @@ func TestCLI_StartWorkflow(t *testing.T) {
 		}
 	}
 
-	// Verify Claude window was created
+	// Verify session has at least one window
 	windowCmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
 	windowOutput, err := windowCmd.Output()
 	if err != nil {
 		t.Errorf("failed to list windows: %v", err)
 	} else {
 		windowNames := string(windowOutput)
-		if !strings.Contains(windowNames, "claude") {
-			t.Errorf("claude window not created. Windows: %s", windowNames)
+		if strings.TrimSpace(windowNames) == "" {
+			t.Errorf("no windows found in session. Windows: %q", windowNames)
 		}
 	}
 

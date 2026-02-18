@@ -4,14 +4,17 @@
 
 - Go 1.25.7+
 - tmux 3.x+
-- A coding agent CLI available in tmux panes (`claude`, `codex`, or `open-code`)
+- A coding agent CLI if you want agent sessions in panes (for example `claude`, `codex`, or `open-code`)
 
 ## Build / Install
 
 ```bash
-git clone https://github.com/rsanzone/clawdbay.git
-cd clawdbay
+git clone https://github.com/ronsanzone/clawd-bay.git
+cd clawd-bay
 # install latest published version
+go install github.com/ronsanzone/clawd-bay@latest
+
+# or via Makefile wrapper
 make install
 
 # or build from this checkout
@@ -55,17 +58,9 @@ cb start --detach <branch-name>
 Behavior:
 - Creates worktree at `<repo>/.worktrees/<repo>-<branch>`.
 - Ensures `.worktrees/` exists and is in `.gitignore`.
-- Creates tmux session `cb_<branch>` and a `claude` window.
+- Creates tmux session `cb_<branch>`.
+- Leaves window/session tooling up to your tmux workflow (run your preferred coding agent CLI in panes as needed).
 - Warns if current repo is not configured in `config.toml`.
-
-### `cb claude`
-
-Add a Claude window to the matching workflow session.
-
-```bash
-cb claude
-cb claude --name review
-```
 
 ### `cb dash` (or `cb`)
 

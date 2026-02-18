@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/rsanzone/clawdbay/internal/discovery"
-	"github.com/rsanzone/clawdbay/internal/tmux"
+	"github.com/ronsanzone/clawd-bay/internal/discovery"
+	"github.com/ronsanzone/clawd-bay/internal/tmux"
 	"github.com/spf13/cobra"
 )
 

@@ -1,0 +1,26 @@
+version: 2
+
+project_name: clawd-bay
+
+builds:
+  - id: cb
+    main: ./main.go
+    binary: cb
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/ronsanzone/clawd-bay/cmd.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
